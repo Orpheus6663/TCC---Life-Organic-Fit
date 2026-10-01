@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "lifeOrganicFit",
+    "slug": "lifeOrganicFit",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "lifeorganicfit",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-splash-screen",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Permita o acesso às fotos para anexar uma imagem a uma publicação anônima.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
