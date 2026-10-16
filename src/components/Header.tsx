@@ -40,7 +40,7 @@ const styles = StyleSheet.create({
   // Faixa clara: centraliza o conteúdo (logo + texto) e dá espaçamento interno.
   lightBar: {
     alignItems: 'center',
-    backgroundColor: colors.lightBlue,
+    backgroundColor: colors.primary,
     paddingBottom: 14,
     paddingTop: 10
   },
@@ -51,7 +51,7 @@ const styles = StyleSheet.create({
   },
   // Estilo do texto "LIFE ORGANIC FIT": cor escura, negrito, letras um pouco espaçadas.
   brand: {
-    color: colors.text,
+    color: colors.white,
     fontSize: 14,
     fontWeight: '800',
     letterSpacing: 0.5,

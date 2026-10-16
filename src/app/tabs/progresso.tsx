@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Header } from '../../components/Header';
 import { colors } from '../../constants/colors';
 
 const weeklyData = {
@@ -23,7 +22,6 @@ export default function ProgressoScreen() {
 
   return (
     <View style={styles.screen}>
-      <Header />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Identifica os dados mostrados como o resumo de hoje. */}
         <View style={styles.todayRow}>
@@ -98,7 +96,7 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingBottom: 22,
     paddingHorizontal: 16,
-    paddingTop: 14
+    paddingTop: 56
   },
   // Define os estilos visuais do elemento "todayRow".
   todayRow: {

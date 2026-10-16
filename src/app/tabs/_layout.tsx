@@ -7,9 +7,9 @@ export default function TabsLayout() {
   return (
     <Tabs screenOptions={{
       headerShown: false,
-      tabBarActiveTintColor: colors.primary,
-      tabBarInactiveTintColor: colors.mutedText,
-      tabBarStyle: { backgroundColor: colors.white, borderTopColor: '#E4E7EC' },
+      tabBarActiveTintColor: colors.white,
+      tabBarInactiveTintColor: colors.white,
+      tabBarStyle: { backgroundColor: colors.primary, borderTopColor: colors.primary },
     }}>
       <Tabs.Screen name="home" options={{ title: 'Início', tabBarIcon: ({ color, size }) => <Ionicons name="home-outline" color={color} size={size} /> }} />
       {/* Abre o fórum de postagens anônimas no lugar da antiga aba Água. */}

@@ -1,11 +1,16 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import { colors } from '../../constants/colors';
-import { saveQuestionnaire } from '../../services/questionnaireService';
+import { getPasswordValidationMessage, signUp } from '../../services/authService';
+import { clearRegistrationDraft, restoreRegistrationDraft, type RegistrationDraft } from '../../services/registrationDraft';
+import { isQuestionnaireAnswers, saveQuestionnaire, saveQuestionnaireForUser } from '../../services/questionnaireService';
 import type { QuestionnaireAnswers } from '../../services/questionnaireService';
+
+const ANSWERS_STORAGE_KEY = '@lifeorganicfit/questionnaire-draft-v1';
 
 type Question = {
   id: string;
@@ -53,8 +58,49 @@ const sections: { title: string; questions: Question[] }[] = [
 
 export default function QuestionarioScreen() {
   const [answers, setAnswers] = useState<QuestionnaireAnswers>({});
+  const [registration, setRegistration] = useState<RegistrationDraft | null>(null);
+  const [password, setPassword] = useState('');
+  const [isDraftRestored, setIsDraftRestored] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [needsEmailConfirmation, setNeedsEmailConfirmation] = useState(false);
+  const [isFinished, setIsFinished] = useState(false);
+
+  useEffect(() => {
+    let isActive = true;
+    const restoreAnswers = AsyncStorage.getItem(ANSWERS_STORAGE_KEY)
+      .then((saved) => {
+        if (!saved) return;
+        const parsed: unknown = JSON.parse(saved);
+        if (isQuestionnaireAnswers(parsed) && isActive) setAnswers(parsed);
+      })
+      .catch(() => {
+        if (isActive) setError('Não foi possível recuperar as respostas salvas neste aparelho.');
+      });
+    const restoreRegistration = restoreRegistrationDraft()
+      .then((saved) => {
+        if (isActive) setRegistration(saved);
+      })
+      .catch(() => {
+        if (isActive) setError('Não foi possível recuperar os dados temporários do cadastro.');
+      });
+
+    Promise.all([restoreAnswers, restoreRegistration]).finally(() => {
+      if (isActive) setIsDraftRestored(true);
+    });
+    return () => { isActive = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!isDraftRestored || isSaving || needsEmailConfirmation || isFinished) return;
+    const timeout = setTimeout(() => {
+      AsyncStorage.setItem(ANSWERS_STORAGE_KEY, JSON.stringify(answers)).catch(() => {
+        setError('Não foi possível salvar o rascunho neste aparelho.');
+      });
+    }, 200);
+    return () => clearTimeout(timeout);
+  }, [answers, isDraftRestored, isSaving, needsEmailConfirmation, isFinished]);
 
   function answer(question: Question, value: string | string[]) {
     setAnswers((current) => ({ ...current, [question.id]: value }));
@@ -87,11 +133,37 @@ export default function QuestionarioScreen() {
     if (!Number.isInteger(age) || age < 13 || age > 120) return setError('Informe uma idade válida (de 13 a 120 anos).');
     if (!Number.isFinite(height) || height < 80 || height > 250) return setError('Informe uma altura válida em centímetros.');
     if (!Number.isFinite(weight) || weight < 20 || weight > 500) return setError('Informe um peso válido em quilos.');
+    if (registration) {
+      const registrationPassword = registration.password || password;
+      if (!registrationPassword) return setError('Digite sua senha novamente para concluir o cadastro.');
+      const passwordError = getPasswordValidationMessage(registrationPassword);
+      if (passwordError) return setError(passwordError);
+    }
 
     setError('');
     setIsSaving(true);
     try {
-      await saveQuestionnaire(answers);
+      await AsyncStorage.setItem(ANSWERS_STORAGE_KEY, JSON.stringify(answers));
+      let newlyCreatedUserId: string | null = null;
+      if (registration) {
+        const result = await signUp({ ...registration, password: registration.password || password }, answers);
+        await clearRegistrationDraft();
+        setRegistration(null);
+        if (!result.session) {
+          setNeedsEmailConfirmation(true);
+          setNotice('Cadastro concluído. Confirme seu e-mail; suas respostas serão salvas quando você entrar.');
+          await AsyncStorage.removeItem(ANSWERS_STORAGE_KEY);
+          return;
+        }
+        newlyCreatedUserId = result.user?.id ?? result.session.user.id;
+      }
+      if (newlyCreatedUserId) {
+        await saveQuestionnaireForUser(newlyCreatedUserId, answers);
+      } else {
+        await saveQuestionnaire(answers);
+      }
+      setIsFinished(true);
+      await AsyncStorage.removeItem(ANSWERS_STORAGE_KEY);
       router.replace('/tabs/home');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Não foi possível salvar suas respostas. Tente novamente.');
@@ -106,7 +178,15 @@ export default function QuestionarioScreen() {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <Text style={styles.heading}>Questionário inicial</Text>
         <Text style={styles.intro}>Leva menos de 5 minutos.</Text>
+        <Text style={styles.autosave}>Suas respostas são salvas automaticamente neste aparelho.</Text>
         <Text style={styles.privacy}>Suas respostas ajudam a personalizar sua experiência. As perguntas de saúde são opcionais.</Text>
+
+        {registration && !registration.password ? (
+          <View style={styles.question}>
+            <Text style={styles.questionTitle}>Digite sua senha novamente para concluir o cadastro.</Text>
+            <Input accessibilityLabel="Senha" editable={!isSaving} onChangeText={setPassword} secureTextEntry value={password} />
+          </View>
+        ) : null}
 
         {sections.map((section) => (
           <View key={section.title} style={styles.section}>
@@ -120,6 +200,7 @@ export default function QuestionarioScreen() {
                   {question.kind === 'number' || question.kind === 'text' ? (
                     <Input
                       accessibilityLabel={question.title}
+                      editable={isDraftRestored && !isSaving && !needsEmailConfirmation}
                       keyboardType={question.kind === 'number' ? 'decimal-pad' : 'default'}
                       multiline={question.kind === 'text'}
                       onChangeText={(value) => answer(question, value)}
@@ -138,6 +219,7 @@ export default function QuestionarioScreen() {
                             key={option}
                             accessibilityRole="button"
                             accessibilityState={{ selected: isSelected }}
+                            disabled={!isDraftRestored || isSaving || needsEmailConfirmation}
                             onPress={() => question.kind === 'multiple' ? toggleOption(question, option) : answer(question, option)}
                             style={[styles.option, isSelected && styles.optionSelected]}
                           >
@@ -155,7 +237,15 @@ export default function QuestionarioScreen() {
 
         <Text style={styles.disclaimer}>Este questionário não substitui avaliação ou orientação de profissionais de saúde.</Text>
         {error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
-        <Button disabled={isSaving} onPress={submit}>{isSaving ? 'Salvando respostas...' : 'Concluir questionário'}</Button>
+        {notice ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text> : null}
+        {needsEmailConfirmation ? (
+          <Pressable accessibilityRole="button" onPress={() => router.replace('/auth/login')}>
+            <Text style={styles.loginLink}>Já confirmou o e-mail? Entrar</Text>
+          </Pressable>
+        ) : null}
+        <Button disabled={!isDraftRestored || isSaving || needsEmailConfirmation} onPress={submit}>
+          {isSaving ? 'Salvando respostas...' : needsEmailConfirmation ? 'Cadastro concluído' : 'Concluir questionário'}
+        </Button>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -186,6 +276,10 @@ const styles = StyleSheet.create({
     color: colors.mutedText,
     fontSize: 15,
     marginTop: -12
+  },
+  autosave: {
+    color: colors.primary,
+    fontSize: 13
   },
   // Define os estilos visuais do elemento "privacy".
   privacy: {
@@ -264,5 +358,17 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontSize: 14,
     lineHeight: 20
+  },
+  notice: {
+    color: colors.primary,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center'
+  },
+  loginLink: {
+    color: colors.primary,
+    fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'center'
   },
 });

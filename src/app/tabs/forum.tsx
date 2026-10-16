@@ -1,13 +1,24 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import type { User } from '@supabase/supabase-js';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useState } from 'react';
-import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Header } from '../../components/Header';
+import { Alert, Image, ImageSourcePropType, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors } from '../../constants/colors';
+import { isSupabaseConfigured, requireSupabase } from '../../lib/supabase';
+import { createForumComment, createForumPost, deleteForumComment, deleteForumPost, loadForumPosts, toggleForumLike } from '../../services/forumService';
 
 // Chave fixa usada para salvar e recuperar os posts neste dispositivo.
 const STORAGE_KEY = '@lifeorganicfit/forum-posts-v1';
+const avatarSources: Record<string, ImageSourcePropType> = {
+  vermelho: require('../../../assets/perfil/vermelho.png'),
+  verde: require('../../../assets/perfil/verde.png'),
+  turquesa: require('../../../assets/perfil/turquesa.png'),
+  rosa: require('../../../assets/perfil/rosa.png'),
+  marrom: require('../../../assets/perfil/marrom.png'),
+  laranja: require('../../../assets/perfil/laranja.png'),
+};
 
 // Define os campos que compõem um comentário e suas respostas.
 type Comment = {
@@ -15,6 +26,9 @@ type Comment = {
   id: string;
   // Texto escrito no comentário.
   text: string;
+  authorName?: string;
+  authorId?: string;
+  avatarId?: string;
   // Data e horário em que o comentário foi criado.
   createdAt: string;
   // Respostas ligadas a este comentário.
@@ -27,6 +41,9 @@ type ForumPost = {
   id: string;
   // Texto da publicação; pode ficar vazio se houver uma foto.
   text: string;
+  authorName?: string;
+  authorId?: string;
+  avatarId?: string;
   // Endereço local da foto, presente somente quando há imagem.
   imageUri?: string;
   // Data de criação usada para mostrar quando foi publicado.
@@ -42,11 +59,32 @@ type ForumPost = {
 // Opções exibidas quando a pessoa seleciona o botão de denúncia.
 const reportReasons = ['Spam ou propaganda', 'Conteúdo inadequado', 'Informação prejudicial', 'Outro motivo'];
 
+function getProfileName(user: User | null) {
+  const name = user?.user_metadata?.name;
+  return typeof name === 'string' && name.trim() ? name.trim() : user?.email?.split('@')[0] ?? 'Pessoa usuária';
+}
+
+function getForumWriteError(error: unknown) {
+  const details = error instanceof Error ? error.message : 'Erro desconhecido.';
+  const normalized = details.toLowerCase();
+  if (normalized.includes('row-level security') || normalized.includes('permission denied') || normalized.includes('policy')) {
+    return `O Supabase bloqueou a publicação. Rode lifeOrganicFit/database/schema.sql no SQL Editor do projeto Supabase. Detalhes: ${details}`;
+  }
+  if (normalized.includes('nome_autor') || normalized.includes('schema cache') || normalized.includes('column')) {
+    return `O banco ainda não tem os campos do fórum atualizados. Rode lifeOrganicFit/database/schema.sql no SQL Editor do projeto Supabase. Detalhes: ${details}`;
+  }
+  return details;
+}
+
 // Componente principal da aba Fórum.
-// Neste protótipo, as publicações e ações são anônimas e ficam apenas neste aparelho.
+// Com Supabase configurado, publicações e comentários são compartilhados entre os usuários.
 export default function ForumScreen() {
   // Lista de publicações carregadas do armazenamento local.
   const [posts, setPosts] = useState<ForumPost[]>([]);
+  const [userName, setUserName] = useState('Pessoa usuária');
+  const [avatarId, setAvatarId] = useState<string | undefined>();
+  const [hasSubscription, setHasSubscription] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
   // Impede salvar a lista vazia antes de terminar a leitura inicial do armazenamento.
   const [isLoaded, setIsLoaded] = useState(false);
   // Controla se o formulário para criar publicação está aberto.
@@ -66,25 +104,54 @@ export default function ForumScreen() {
   // Guarda as publicações já denunciadas neste uso da tela.
   const [reportedPostIds, setReportedPostIds] = useState<string[]>([]);
 
-  // Carrega publicações locais ao abrir a aba.
   useEffect(() => {
-    // Lê a lista gravada na última vez em que o fórum foi usado.
-    AsyncStorage.getItem(STORAGE_KEY)
-      // Converte o texto JSON guardado de volta para uma lista de publicações.
-      .then((savedPosts) => {
-        if (savedPosts) setPosts(JSON.parse(savedPosts) as ForumPost[]);
-      })
-      // Mostra um aviso caso o armazenamento local não possa ser lido.
-      .catch(() => Alert.alert('Fórum', 'Não foi possível carregar as publicações salvas neste aparelho.'))
-      // Libera a tela para mostrar a lista após a tentativa de leitura terminar.
-      .finally(() => setIsLoaded(true));
-    // A lista vazia no array garante que esta leitura ocorra só ao montar a tela.
+    if (!isSupabaseConfigured) return;
+    const client = requireSupabase();
+    const { data: authListener } = client.auth.onAuthStateChange((_event, session) => {
+      const user = session?.user ?? null;
+      setUserName(getProfileName(user));
+      setUserId(user?.id ?? null);
+      setAvatarId(typeof user?.user_metadata?.avatar_id === 'string' ? user.user_metadata.avatar_id : undefined);
+      setHasSubscription(user?.app_metadata?.subscription_active === true);
+    });
+    void client.auth.getUser().then(({ data, error }) => {
+      if (!error && data.user) {
+        setUserName(getProfileName(data.user));
+        setUserId(data.user.id);
+        setAvatarId(typeof data.user.user_metadata?.avatar_id === 'string' ? data.user.user_metadata.avatar_id : undefined);
+        setHasSubscription(data.user.app_metadata?.subscription_active === true);
+      }
+    });
+    return () => authListener.subscription.unsubscribe();
   }, []);
+
+  // Carrega o feed compartilhado do Supabase; sem credenciais mantém o protótipo local.
+  useEffect(() => {
+    let isActive = true;
+    setIsLoaded(false);
+    const load = async () => {
+      try {
+        if (isSupabaseConfigured) {
+          const loadedPosts = await loadForumPosts();
+          if (isActive) setPosts(loadedPosts);
+        } else {
+          const savedPosts = await AsyncStorage.getItem(STORAGE_KEY);
+          if (isActive && savedPosts) setPosts(JSON.parse(savedPosts) as ForumPost[]);
+        }
+      } catch (error) {
+        if (isActive) Alert.alert('Fórum', error instanceof Error ? error.message : 'Não foi possível carregar as publicações.');
+      } finally {
+        if (isActive) setIsLoaded(true);
+      }
+    };
+    void load();
+    return () => { isActive = false; };
+  }, [userId]);
 
   // Mantém as publicações no aparelho. Para compartilhar entre pessoas, conecte ao Supabase.
   useEffect(() => {
     // Aguarda a leitura inicial para não substituir dados salvos por uma lista vazia.
-    if (isLoaded) {
+    if (isLoaded && !isSupabaseConfigured) {
       // Converte as publicações em JSON e as salva no armazenamento do aparelho.
       AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(posts)).catch(() => {
         // Informa a pessoa se o aparelho não conseguir guardar as alterações.
@@ -96,6 +163,10 @@ export default function ForumScreen() {
 
   // Abre a galeria do celular para escolher uma foto para a publicação.
   async function choosePhoto() {
+    if (!hasSubscription) {
+      Alert.alert('Recurso para assinantes', 'Assine o Life Organic Fit para adicionar fotos da galeria às suas publicações.');
+      return;
+    }
     try {
       // Abre o seletor de fotos, permite corte e reduz o tamanho da imagem escolhida.
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -104,23 +175,56 @@ export default function ForumScreen() {
         quality: 0.8,
       });
       // Atualiza a prévia somente se a pessoa não cancelou o seletor.
-      if (!result.canceled) setPhotoUri(result.assets[0]?.uri ?? null);
+      if (!result.canceled) {
+        const selectedUri = result.assets[0]?.uri;
+        if (!selectedUri) return;
+        if (!FileSystem.documentDirectory) throw new Error('Armazenamento local indisponível.');
+        const extension = selectedUri.split('.').pop()?.split('?')[0] || 'jpg';
+        const savedUri = `${FileSystem.documentDirectory}forum-${Date.now()}.${extension}`;
+        await FileSystem.copyAsync({ from: selectedUri, to: savedUri });
+        setPhotoUri(savedUri);
+      }
     } catch {
       // Mostra um erro se a galeria não puder ser aberta.
       Alert.alert('Não foi possível abrir as fotos', 'Confira as permissões do aplicativo e tente novamente.');
     }
   }
 
-  // Cria um post sem nome, perfil ou qualquer identificação visível da pessoa.
-  function publishPost() {
+  // Salva o nome associado à conta junto da publicação.
+  async function publishPost() {
     // Remove espaços extras antes de validar e guardar o texto.
     const text = postText.trim();
     // Não permite publicar um cartão totalmente vazio.
     if (!text && !photoUri) return;
+    if (isSupabaseConfigured) {
+      if (!userId) {
+        Alert.alert('Entre na sua conta', 'Faça login para publicar no fórum.');
+        return;
+      }
+      if (photoUri) {
+        Alert.alert('Foto indisponível', 'As tabelas do fórum ainda não têm um campo para armazenar fotos. Publique somente texto por enquanto.');
+        return;
+      }
+      try {
+        await createForumPost({ text, userId, authorName: userName, avatarId });
+        const loadedPosts = await loadForumPosts();
+        setPosts(loadedPosts);
+      } catch (error) {
+        Alert.alert('Não foi possível publicar', getForumWriteError(error));
+        return;
+      }
+      setPostText('');
+      setPhotoUri(null);
+      setIsComposerOpen(false);
+      return;
+    }
     // Monta a publicação com data, zero curtidas e nenhuma resposta inicial.
     const post: ForumPost = {
       id: `${Date.now()}`,
       text,
+      authorName: userName,
+      authorId: userId ?? 'local-device',
+      avatarId,
       imageUri: photoUri ?? undefined,
       createdAt: new Date().toISOString(),
       likes: 0,
@@ -137,8 +241,68 @@ export default function ForumScreen() {
     setIsComposerOpen(false);
   }
 
+  function deletePost(post: ForumPost) {
+    Alert.alert('Excluir publicação', 'Deseja excluir esta publicação?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Excluir',
+        style: 'destructive',
+        onPress: async () => {
+          if (isSupabaseConfigured) {
+            try { await deleteForumPost(post.id); }
+            catch (error) { Alert.alert('Fórum', error instanceof Error ? error.message : 'Não foi possível excluir.'); return; }
+          }
+          setPosts((current) => current.filter((item) => item.id !== post.id));
+        },
+      },
+    ]);
+  }
+
+  function deleteComment(postId: string, comment: Comment, parentId?: string) {
+    Alert.alert('Excluir comentário', 'Deseja excluir este comentário?', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Excluir', style: 'destructive', onPress: async () => {
+        if (isSupabaseConfigured) {
+          try {
+            await deleteForumComment(comment.id);
+            const loadedPosts = await loadForumPosts();
+            setPosts(loadedPosts);
+          } catch (error) {
+            Alert.alert('Fórum', error instanceof Error ? error.message : 'Não foi possível excluir o comentário.');
+          }
+          return;
+        }
+        setPosts((current) => current.map((post) => post.id !== postId ? post : {
+          ...post,
+          comments: parentId
+            ? post.comments.map((entry) => entry.id === parentId ? { ...entry, replies: entry.replies.filter((reply) => reply.id !== comment.id) } : entry)
+            : post.comments.filter((entry) => entry.id !== comment.id),
+        }));
+      } },
+    ]);
+  }
+
   // Marca ou remove a curtida local da pessoa neste post.
   function toggleLike(postId: string) {
+    const targetPost = posts.find((post) => post.id === postId);
+    if (isSupabaseConfigured) {
+      if (!userId) {
+        Alert.alert('Entre na sua conta', 'Faça login para curtir publicações.');
+        return;
+      }
+      if (!targetPost) return;
+      const previousLiked = targetPost.likedByMe;
+      setPosts((current) => current.map((post) => post.id === postId
+        ? { ...post, likedByMe: !previousLiked, likes: Math.max(0, post.likes + (previousLiked ? -1 : 1)) }
+        : post));
+      void toggleForumLike({ postId, userId, liked: previousLiked }).catch((error) => {
+        setPosts((current) => current.map((post) => post.id === postId
+          ? { ...post, likedByMe: previousLiked, likes: Math.max(0, post.likes + (previousLiked ? 1 : -1)) }
+          : post));
+        Alert.alert('Fórum', error instanceof Error ? error.message : 'Não foi possível registrar a curtida.');
+      });
+      return;
+    }
     // Atualiza somente a publicação tocada, mantendo as demais como estão.
     setPosts((current) => current.map((post) => {
       // Retorna sem alteração quando este não é o post selecionado.
@@ -151,13 +315,37 @@ export default function ForumScreen() {
   }
 
   // Adiciona um comentário anônimo ou uma resposta a outro comentário.
-  function submitComment(postId: string) {
+  async function submitComment(postId: string) {
     // Remove espaços em branco das pontas do comentário.
     const text = commentText.trim();
     // Não cria comentário vazio.
     if (!text) return;
+    if (isSupabaseConfigured) {
+      if (!userId) {
+        Alert.alert('Entre na sua conta', 'Faça login para comentar no fórum.');
+        return;
+      }
+      try {
+        await createForumComment({
+          postId,
+          text,
+          userId,
+          authorName: userName,
+          avatarId,
+          parentCommentId: replyingTo?.postId === postId ? replyingTo.commentId : undefined,
+        });
+        const loadedPosts = await loadForumPosts();
+        setPosts(loadedPosts);
+      } catch (error) {
+        Alert.alert('Não foi possível comentar', getForumWriteError(error));
+        return;
+      }
+      setCommentText('');
+      setReplyingTo(null);
+      return;
+    }
     // Prepara o novo comentário com identificador, data e lista de respostas vazia.
-    const newComment: Comment = { id: `${Date.now()}`, text, createdAt: new Date().toISOString(), replies: [] };
+    const newComment: Comment = { id: `${Date.now()}`, text, authorName: userName, authorId: userId ?? 'local-device', createdAt: new Date().toISOString(), replies: [] };
 
     // Atualiza a publicação certa, acrescentando resposta ou comentário principal.
     setPosts((current) => current.map((post) => {
@@ -196,38 +384,26 @@ export default function ForumScreen() {
     // O style ocupa a tela toda e o behavior adiciona ajuste de teclado somente no iOS.
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       {/* Cabeçalho com a marca, compartilhado com as outras abas. */}
-      <Header />
       {/* Cabeçalho local: título, descrição e botão que abre ou fecha o formulário. */}
       <View style={styles.heading}>
         {/* Ícone decorativo que identifica a área de conversa da comunidade. */}
         <View style={styles.headingIcon}><Ionicons name="chatbubbles" size={22} color={colors.primary} /></View>
         {/* Agrupa título e subtítulo para ocupar o espaço entre os botões. */}
         <View style={styles.headingText}>
-          <Text style={styles.title}>Fórum anônimo</Text>
+          <Text style={styles.title}>Fórum da comunidade</Text>
           <Text style={styles.subtitle}>Converse e compartilhe com a comunidade</Text>
         </View>
-        {/* O rótulo acessível descreve o botão; o ícone muda conforme o formulário abre ou fecha. */}
-        <Pressable accessibilityRole="button" accessibilityLabel="Criar publicação" onPress={() => setIsComposerOpen((open) => !open)} style={styles.newPostButton}>
-          <Ionicons name={isComposerOpen ? 'close' : 'add'} size={23} color={colors.white} />
-        </Pressable>
       </View>
 
       {/* Feed rolável; os toques no teclado não fecham os campos automaticamente. */}
       <ScrollView contentContainerStyle={styles.feed} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        {/* Aviso de privacidade: no protótipo, os posts ainda não saem deste aparelho. */}
-        {/* Ícone de cadeado reforça que este protótipo ainda mantém os dados localmente. */}
-        <View style={styles.localNotice}>
-          <Ionicons name="lock-closed-outline" size={16} color={colors.primaryDark} />
-          <Text style={styles.localNoticeText}>Você aparece como Anônimo. Por enquanto, as postagens são salvas só neste aparelho.</Text>
-        </View>
-
         {isComposerOpen ? (
           // Formulário que aparece depois de tocar no botão de nova publicação.
           <View style={styles.composerCard}>
             {/* Não exibe nome ou foto de perfil; todas as pessoas aparecem como anônimas. */}
             <View style={styles.anonymousRow}>
-              <View style={styles.avatar}><Ionicons name="person" size={18} color={colors.primary} /></View>
-              <Text style={styles.anonymousLabel}>Publicando anonimamente</Text>
+              <View style={styles.avatar}>{avatarId && avatarSources[avatarId] ? <Image source={avatarSources[avatarId]} style={styles.avatarImage} /> : <Ionicons name="person" size={18} color={colors.primary} />}</View>
+              <Text style={styles.anonymousLabel}>Publicando como {userName}</Text>
             </View>
             {/* O rótulo ajuda leitores de tela, multiline permite várias linhas e placeholder orienta antes da digitação. */}
             {/* onChangeText atualiza o estado e value mantém o campo sincronizado com esse estado. */}
@@ -251,9 +427,9 @@ export default function ForumScreen() {
             ) : null}
             <View style={styles.composerActions}>
               {/* Abre a galeria e muda o texto do botão se já houver uma imagem anexada. */}
-              <Pressable accessibilityRole="button" onPress={choosePhoto} style={styles.photoButton}>
-                <Ionicons name="image-outline" size={19} color={colors.primary} />
-                <Text style={styles.photoButtonText}>{photoUri ? 'Trocar foto' : 'Adicionar foto'}</Text>
+              <Pressable accessibilityRole="button" disabled={isSupabaseConfigured} onPress={choosePhoto} style={styles.photoButton}>
+                <Ionicons name="image-outline" size={19} color={isSupabaseConfigured ? colors.mutedText : colors.primary} />
+                <Text style={styles.photoButtonText}>{isSupabaseConfigured ? 'Fotos indisponíveis' : photoUri ? 'Trocar foto' : hasSubscription ? 'Adicionar foto' : 'Foto da galeria · assinantes'}</Text>
               </Pressable>
               {/* Fica desativado enquanto não houver texto nem foto para publicar. */}
               <Pressable accessibilityRole="button" disabled={!postText.trim() && !photoUri} onPress={publishPost} style={[styles.publishButton, !postText.trim() && !photoUri && styles.disabledButton]}>
@@ -279,16 +455,23 @@ export default function ForumScreen() {
             {/* Cabeçalho anônimo, data e botão para abrir as opções de denúncia. */}
             <View style={styles.postHeader}>
               <View style={styles.anonymousRow}>
-                <View style={styles.avatar}><Ionicons name="person" size={17} color={colors.primary} /></View>
+                <View style={styles.avatar}>{post.avatarId && avatarSources[post.avatarId] ? <Image source={avatarSources[post.avatarId]} style={styles.avatarImage} /> : <Ionicons name="person" size={17} color={colors.primary} />}</View>
                 <View>
-                  <Text style={styles.anonymousLabel}>Anônimo</Text>
+                  <Text style={styles.anonymousLabel}>{post.authorName || 'Anônimo'}</Text>
                   <Text style={styles.postDate}>{new Date(post.createdAt).toLocaleString('pt-BR')}</Text>
                 </View>
               </View>
               {/* O botão muda o ícone e fica desativado quando a denúncia já foi registrada. */}
-              <Pressable accessibilityRole="button" accessibilityLabel="Denunciar publicação" disabled={reportedPostIds.includes(post.id)} onPress={() => setReportingPostId(reportingPostId === post.id ? null : post.id)} style={styles.reportButton}>
-                <Ionicons name={reportedPostIds.includes(post.id) ? 'flag' : 'flag-outline'} size={19} color={reportedPostIds.includes(post.id) ? colors.mutedText : colors.danger} />
-              </Pressable>
+              <View style={styles.postHeaderActions}>
+        {post.authorId === (userId ?? 'local-device') ? (
+                  <Pressable accessibilityRole="button" accessibilityLabel="Excluir publicação" onPress={() => deletePost(post)} style={styles.reportButton}>
+                    <Ionicons name="trash-outline" size={19} color={colors.danger} />
+                  </Pressable>
+                ) : null}
+                {!isSupabaseConfigured ? <Pressable accessibilityRole="button" accessibilityLabel="Denunciar publicação" disabled={reportedPostIds.includes(post.id)} onPress={() => setReportingPostId(reportingPostId === post.id ? null : post.id)} style={styles.reportButton}>
+                  <Ionicons name={reportedPostIds.includes(post.id) ? 'flag' : 'flag-outline'} size={19} color={reportedPostIds.includes(post.id) ? colors.mutedText : colors.danger} />
+                </Pressable> : null}
+              </View>
             </View>
 
             {/* Texto e foto só são renderizados se existirem na publicação. */}
@@ -316,7 +499,7 @@ export default function ForumScreen() {
               {/* Abre ou fecha a conversa desta publicação. */}
               <Pressable accessibilityRole="button" accessibilityLabel="Mostrar comentários" onPress={() => setExpandedPostId(expandedPostId === post.id ? null : post.id)} style={styles.actionButton}>
                 <Ionicons name="chatbubble-outline" size={19} color={colors.text} />
-                <Text style={styles.actionText}>{post.comments.length} Comentários</Text>
+                <Text style={styles.actionText}>{post.comments.reduce((count, comment) => count + 1 + comment.replies.length, 0)} Comentários</Text>
               </Pressable>
             </View>
 
@@ -327,23 +510,25 @@ export default function ForumScreen() {
                   // Comentário principal com botão para iniciar uma resposta.
                   <View key={comment.id} style={styles.commentBlock}>
                     <View style={styles.commentRow}>
-                      <View style={styles.smallAvatar}><Ionicons name="person" size={12} color={colors.primary} /></View>
+                      <View style={styles.smallAvatar}>{comment.avatarId && avatarSources[comment.avatarId] ? <Image source={avatarSources[comment.avatarId]} style={styles.smallAvatarImage} /> : <Ionicons name="person" size={12} color={colors.primary} />}</View>
                       <View style={styles.commentContent}>
-                        <Text style={styles.commentAuthor}>Anônimo</Text>
+                        <Text style={styles.commentAuthor}>{comment.authorName || 'Anônimo'}</Text>
                         <Text style={styles.commentText}>{comment.text}</Text>
                         <Pressable accessibilityRole="button" onPress={() => setReplyingTo({ postId: post.id, commentId: comment.id })}>
                           <Text style={styles.replyLink}>Responder</Text>
                         </Pressable>
                       </View>
+                      {comment.authorId === (userId ?? 'local-device') ? <Pressable accessibilityRole="button" accessibilityLabel="Excluir comentário" onPress={() => deleteComment(post.id, comment)} style={styles.reportButton}><Ionicons name="trash-outline" size={16} color={colors.danger} /></Pressable> : null}
                     </View>
                     {comment.replies.map((reply) => (
                       // Respostas ficam visualmente recuadas em relação ao comentário original.
                       <View key={reply.id} style={styles.replyRow}>
-                        <View style={styles.smallAvatar}><Ionicons name="person" size={12} color={colors.primary} /></View>
+                        <View style={styles.smallAvatar}>{reply.avatarId && avatarSources[reply.avatarId] ? <Image source={avatarSources[reply.avatarId]} style={styles.smallAvatarImage} /> : <Ionicons name="person" size={12} color={colors.primary} />}</View>
                         <View style={styles.commentContent}>
-                          <Text style={styles.commentAuthor}>Anônimo · resposta</Text>
+                          <Text style={styles.commentAuthor}>{reply.authorName || 'Anônimo'} · resposta</Text>
                           <Text style={styles.commentText}>{reply.text}</Text>
                         </View>
+                        {reply.authorId === (userId ?? 'local-device') ? <Pressable accessibilityRole="button" accessibilityLabel="Excluir resposta" onPress={() => deleteComment(post.id, reply, comment.id)} style={styles.reportButton}><Ionicons name="trash-outline" size={16} color={colors.danger} /></Pressable> : null}
                       </View>
                     ))}
                   </View>
@@ -376,6 +561,14 @@ export default function ForumScreen() {
           </View>
         ))}
       </ScrollView>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={isComposerOpen ? 'Fechar criação de publicação' : 'Criar publicação'}
+        onPress={() => setIsComposerOpen((open) => !open)}
+        style={styles.floatingPostButton}
+      >
+        <Ionicons name={isComposerOpen ? 'close' : 'add'} size={28} color={colors.white} />
+      </Pressable>
     </KeyboardAvoidingView>
   );
 }
@@ -396,7 +589,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 11,
     paddingHorizontal: 16,
-    paddingVertical: 13
+    paddingTop: 53,
+    paddingBottom: 13
   },
 
   // Círculo azul-claro atrás do ícone do fórum.
@@ -428,38 +622,30 @@ const styles = StyleSheet.create({
     fontSize: 11
   },
 
-  // Botão circular para abrir o formulário.
-  newPostButton: {
+  // Botão flutuante centralizado logo acima da barra de abas.
+  floatingPostButton: {
     alignItems: 'center',
     backgroundColor: colors.primary,
-    borderRadius: 20,
-    height: 40,
+    borderRadius: 28,
+    bottom: 10,
+    elevation: 6,
+    height: 56,
     justifyContent: 'center',
-    width: 40
+    left: '50%',
+    marginLeft: -28,
+    position: 'absolute',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.24,
+    shadowRadius: 4,
+    width: 56,
   },
   
   // Espaçamento e margens dos cartões no feed.
   feed: {
     gap: 13,
     padding: 13,
-    paddingBottom: 24
-  },
-  // Cartão do aviso sobre dados locais.
-  localNotice: {
-    alignItems: 'center',
-    backgroundColor: '#EAF4FF',
-    borderRadius: 12,
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10
-  },
-  // Texto do aviso, com quebra para caber na largura.
-  localNoticeText: {
-    color: colors.primaryDark,
-    flex: 1,
-    fontSize: 11,
-    lineHeight: 16
+    paddingBottom: 88
   },
   // Cartão do formulário de nova publicação.
   composerCard: {
@@ -485,6 +671,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 36
   },
+  avatarImage: { borderRadius: 18, height: '100%', width: '100%' },
   // Texto que marca a publicação como anônima.
   anonymousLabel: {
     color: colors.text,
@@ -602,6 +789,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between'
   },
+  postHeaderActions: { alignItems: 'center', flexDirection: 'row' },
   // Texto pequeno para a data da publicação.
   postDate: {
     color: colors.mutedText,
@@ -704,6 +892,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 26
   },
+  smallAvatarImage: { borderRadius: 13, height: '100%', width: '100%' },
   // Texto do comentário ocupa o espaço restante.
   commentContent: {
     flex: 1,

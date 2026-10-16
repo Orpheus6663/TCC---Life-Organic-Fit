@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Header } from '../../components/Header';
+import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors } from '../../constants/colors';
 import { sendMessageToAI } from '../../services/aiService';
 import type { AiMessage } from '../../services/aiService';
+import { getQuestionnairePreferencesForAI } from '../../services/questionnaireService';
 
 // Cada mensagem tem um identificador para a lista e um papel para definir o lado do balão.
 type ChatMessage = AiMessage & { id: number };
@@ -37,7 +37,8 @@ export default function IaScreen() {
     setIsSending(true);
 
     try {
-      const reply = await sendMessageToAI(conversation.map(({ role, content }) => ({ role, content })));
+      const preferences = await getQuestionnairePreferencesForAI();
+      const reply = await sendMessageToAI(conversation.map(({ role, content }) => ({ role, content })), preferences);
       setMessages((current) => [...current, { id: Date.now(), role: 'assistant', content: reply }]);
     } catch (error) {
       const errorText = error instanceof Error ? error.message : 'Não foi possível obter uma resposta da IA.';
@@ -50,14 +51,13 @@ export default function IaScreen() {
   return (
     // Ajusta a tela quando o teclado aparece, principalmente no iOS.
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      {/* Cabeçalho compartilhado com as outras telas do aplicativo. */}
-      <Header />
-
       {/* Mostra o nome da assistente e o assunto da conversa. */}
       <View style={styles.titleRow}>
-        <View style={styles.sparkle}><Ionicons name="sparkles" size={20} color={colors.primary} /></View>
+        <View style={styles.sparkle}>
+          <Image source={require('../../../assets/logoIA.png')} style={styles.logo} resizeMode="contain" />
+        </View>
         <View style={styles.titleCopy}>
-          <Text style={styles.title}>Sua assistente</Text>
+          <Text style={styles.title}>NutriIA</Text>
           <Text style={styles.subtitle}>Bem-estar, alimentação e movimento</Text>
         </View>
       </View>
@@ -82,7 +82,9 @@ export default function IaScreen() {
         ) : messages.map((item) => (
           // Mensagens da pessoa ficam à direita; respostas da IA ficam à esquerda.
           <View key={item.id} style={[styles.messageRow, item.role === 'user' && styles.userMessageRow]}>
-            {item.role === 'assistant' ? <Ionicons name="sparkles" size={17} color={colors.primary} style={styles.messageIcon} /> : null}
+            {item.role === 'assistant' ? (
+              <Image source={require('../../../assets/logoIA.png')} style={styles.messageLogo} resizeMode="contain" />
+            ) : null}
             <View style={[styles.bubble, item.role === 'user' ? styles.userBubble : styles.assistantBubble]}>
               <Text style={[styles.bubbleText, item.role === 'user' && styles.userBubbleText]}>{item.content}</Text>
             </View>
@@ -129,21 +131,27 @@ const styles = StyleSheet.create({
   // Organiza o ícone e os títulos da conversa em uma linha.
   titleRow: {
     alignItems: 'center',
-    borderBottomColor: '#EAECF0',
+    backgroundColor: colors.primary,
+    borderBottomColor: colors.primaryDark,
     borderBottomWidth: 1,
     flexDirection: 'row',
     gap: 12,
+    paddingTop: 56,
     paddingHorizontal: 20,
-    paddingVertical: 16
+    paddingBottom: 16
   },
   // Círculo azul-claro atrás do ícone de brilho.
   sparkle: {
     alignItems: 'center',
-    backgroundColor: '#EAF4FF',
+    backgroundColor: colors.white,
     borderRadius: 20,
     height: 40,
     justifyContent: 'center',
     width: 40
+  },
+  logo: {
+    height: 32,
+    width: 32
   },
   // Permite que os textos ocupem o espaço restante do cabeçalho.
   titleCopy: {
@@ -152,13 +160,13 @@ const styles = StyleSheet.create({
   },
   // Título principal da assistente.
   title: {
-    color: colors.text,
+    color: colors.white,
     fontSize: 18,
     fontWeight: '800'
   },
   // Linha de descrição abaixo do título.
   subtitle: {
-    color: colors.mutedText,
+    color: '#DCEBFA',
     fontSize: 12
   },
   // Faz o histórico crescer e permite rolar mensagens longas.
@@ -232,8 +240,10 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end'
   },
   // Espaço abaixo do ícone da IA para alinhá-lo com o balão.
-  messageIcon: {
-    marginBottom: 8
+  messageLogo: {
+    height: 36,
+    marginBottom: 8,
+    width: 36
   },
   // Formato comum de todas as mensagens.
   bubble: {

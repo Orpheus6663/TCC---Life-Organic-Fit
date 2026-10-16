@@ -1,10 +1,11 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import { colors } from '../../constants/colors';
-import { signUp } from '../../services/authService';
+import { getPasswordValidationMessage } from '../../services/authService';
+import { setRegistrationDraft } from '../../services/registrationDraft';
 
 // Define a tela usada para criar uma nova conta.
 export default function CadastroScreen() {
@@ -27,17 +28,16 @@ export default function CadastroScreen() {
       setFormError('Preencha todos os campos para criar sua conta.');
       return;
     }
+    const passwordError = getPasswordValidationMessage(password);
+    if (passwordError) {
+      setFormError(passwordError);
+      return;
+    }
     setFormError('');
     setIsSubmitting(true);
     try {
-      const result = await signUp({ name, phone, email, password });
-      if (result.session) {
-        router.replace('/auth/questionario');
-      } else {
-        Alert.alert('Confira seu e-mail', 'O Supabase enviou um link de confirmação. Confirme o endereço antes de entrar.', [
-          { text: 'Ir para login', onPress: () => router.replace('/auth/login') },
-        ]);
-      }
+      await setRegistrationDraft({ name, phone, email, password });
+      router.replace('/auth/questionario');
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Não foi possível criar sua conta. Tente novamente.');
     } finally {
@@ -74,7 +74,7 @@ export default function CadastroScreen() {
           {/* Agrupa os quatro campos necessários para o cadastro. */}
           <View style={styles.fields}>
             <Input autoComplete="name" label="Nome" onChangeText={(value) => { setName(value); setFormError(''); }} placeholder="ex.: João Silva" value={name} />
-            <Input keyboardType="phone-pad" label="Telefone" onChangeText={(value) => { setPhone(value); setFormError(''); }} placeholder="(**) *********" value={phone} />
+            <Input keyboardType="phone-pad" label="Telefone" onChangeText={(value) => { setPhone(value.replace(/\D/g, '')); setFormError(''); }} placeholder="Digite seu telefone" value={phone} />
             <Input autoCapitalize="none" autoComplete="email" keyboardType="email-address" label="E-mail" onChangeText={(value) => { setEmail(value); setFormError(''); }} placeholder="Digite seu email" value={email} />
             <Input autoComplete="new-password" label="Senha" onChangeText={(value) => { setPassword(value); setFormError(''); }} placeholder="Digite sua senha" secureTextEntry value={password} />
           </View>
