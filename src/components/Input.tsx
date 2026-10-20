@@ -1,19 +1,20 @@
 import type { TextInputProps } from 'react-native';
 import { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View, useColorScheme } from 'react-native';
 import { colors } from '../constants/colors';
 
 type InputProps = TextInputProps & { label?: string };
 
 export function Input({ label, style, onBlur, onFocus, ...props }: InputProps) {
   const [isFocused, setIsFocused] = useState(false);
+  const isDark = useColorScheme() === 'dark';
 
   return (
     <View style={styles.wrapper}>
-      {label ? <Text style={styles.label}>{label}</Text> : null}
+      {label ? <Text style={[styles.label, isDark && styles.labelDark]}>{label}</Text> : null}
       <TextInput
-        placeholderTextColor={colors.mutedText}
-        style={[styles.input, isFocused && styles.inputFocused, style]}
+        placeholderTextColor={isDark ? '#AEBAC7' : colors.mutedText}
+        style={[styles.input, isDark && styles.inputDark, isFocused && (isDark ? styles.inputFocusedDark : styles.inputFocused), style]}
         onBlur={(event) => {
           setIsFocused(false);
           onBlur?.(event);
@@ -39,6 +40,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600'
   },
+  labelDark: { color: '#F2F5F8' },
   // Define os estilos visuais do elemento "input".
   input: {
     backgroundColor: colors.inputBackground,
@@ -50,10 +52,12 @@ const styles = StyleSheet.create({
     height: 52,
     paddingHorizontal: 16
   },
+  inputDark: { backgroundColor: '#202A35', borderColor: '#405061', color: '#F2F5F8' },
   // Define os estilos visuais do elemento "inputFocused".
   inputFocused: {
     backgroundColor: colors.white,
     borderColor: colors.primary,
     borderWidth: 2
   },
+  inputFocusedDark: { backgroundColor: '#263544', borderColor: colors.lightBlue },
 });

@@ -3,6 +3,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../../constants/colors';
+import { ThemeSurface } from '../../components/ThemeSurface';
 import { isSupabaseConfigured } from '../../lib/supabase';
 import { getMeals, MEAL_TYPES, type Meal } from '../../services/mealService';
 
@@ -43,7 +44,7 @@ export default function RefeicoesScreen() {
   const totalCalories = meals.reduce((sum, meal) => sum + meal.calories, 0);
 
   return (
-    <View style={styles.screen}>
+    <ThemeSurface><View style={styles.screen}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Alimentos de hoje</Text>
         <Pressable accessibilityRole="button" accessibilityLabel="Identificar alimento pela foto" onPress={showPaidPhotoNotice} style={styles.cameraButton}>
@@ -89,7 +90,7 @@ export default function RefeicoesScreen() {
           <Text style={styles.photoLinkText}>Identificar alimento pela foto · recurso pago</Text>
         </Pressable>
       </ScrollView>
-    </View>
+    </View></ThemeSurface>
   );
 }
 

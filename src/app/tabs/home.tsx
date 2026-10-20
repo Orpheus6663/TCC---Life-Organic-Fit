@@ -1,9 +1,19 @@
-import { useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
+import { Animated, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import type { ImageSourcePropType } from 'react-native';
 import { Card } from '../../components/Card';
 import { Header } from '../../components/Header';
+import { ThemeSurface } from '../../components/ThemeSurface';
 import { colors } from '../../constants/colors';
+import { isSupabaseConfigured, requireSupabase } from '../../lib/supabase';
+import { loadForumPosts } from '../../services/forumService';
+import type { ForumPost } from '../../services/forumService';
+
+// Recupera as publicações locais quando o fórum ainda não está conectado ao Supabase.
+const FORUM_STORAGE_KEY = '@lifeorganicfit/forum-posts-v1';
 
 // Lista de imagens do carrossel exibido no topo da Home.
 const BANNERS: ImageSourcePropType[] = [
@@ -13,10 +23,128 @@ const BANNERS: ImageSourcePropType[] = [
   require('@/assets/banners/comida.jpg')
 ];
 
+// Usa as mesmas opções de avatar que a pessoa escolhe na tela de perfil.
+const PROFILE_AVATARS: Record<string, ImageSourcePropType> = {
+  vermelho: require('../../../assets/perfil/vermelho.png'),
+  verde: require('../../../assets/perfil/verde.png'),
+  turquesa: require('../../../assets/perfil/turquesa.png'),
+  rosa: require('../../../assets/perfil/rosa.png'),
+  marrom: require('../../../assets/perfil/marrom.png'),
+  laranja: require('../../../assets/perfil/laranja.png')
+};
+
+// Frases alternadas pela data local para que a mesma frase apareça durante cada dia.
+const DAILY_PHRASES = [
+  'O corpo alcança o que a mente acredita.',
+  'A boa saúde é a chave para uma vida plena e feliz. Pequenas mudanças hoje, grandes conquistas amanhã.',
+  'Saúde é o luxo que nunca sai de moda.',
+  'O primeiro passo é decidir que você não vai ficar onde está.',
+  'Pequenas melhorias diárias são a chave para resultados a longo prazo.',
+  'Transforme intenções em ações.',
+  'Cuide-se com amor e respeito, nutrindo o corpo com o que ele precisa.',
+  'Quem cuida do corpo fortalece a alma.',
+  'Cuidar da saúde não é uma obrigação para um dia, é um compromisso para a vida toda.',
+  'Os resultados não aparecem da noite para o dia, mas aparecem para quem não desiste.',
+  'O seu corpo é a sua única casa fixa. Cuide bem da sua estrutura.',
+  'Seja mais forte do que a sua melhor desculpa.',
+  'Cada escolha saudável é um voto a favor da pessoa que você quer se tornar.',
+  'Descasque mais, desembale menos.',
+  'Alimentar-se bem é uma das formas mais puras de respeito e amor-próprio.',
+  'Comida de verdade nutre as células; o equilíbrio nutre a alma.',
+  'Seu corpo é um reflexo do que você consome, tanto física quanto mentalmente.',
+  'Não compare o seu capítulo 1 com o capítulo 20 de outra pessoa. Foque na sua evolução.',
+  'O treino de hoje constrói a energia e a disposição que você terá amanhã.',
+  'Comece onde você está, use o que você tem e faça o que você pode.',
+  'Não precisa ser perfeito, só precisa ser constante.'
+];
+
+// Seleciona a frase usando o dia local, sem depender de conexão com a internet.
+function getDailyPhrase(date = new Date()) {
+  const localDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const dayNumber = Math.floor(localDate.getTime() / 86_400_000);
+  return DAILY_PHRASES[dayNumber % DAILY_PHRASES.length];
+}
+
 // Define a tela inicial, exibida depois que a pessoa faz login (e completa o questionário, se for a primeira vez).
 export default function HomeScreen() {
   // Guarda o índice (posição) da imagem do carrossel que está sendo mostrada agora. Começa em 0 (a primeira).
   const [bannerIndex, setBannerIndex] = useState(0);
+  // Guarda o avatar selecionado no perfil para exibi-lo também na tela inicial.
+  const [avatarId, setAvatarId] = useState<string | null>(null);
+  // Guarda a publicação que está no topo do ranking de curtidas.
+  const [trendingPosts, setTrendingPosts] = useState<ForumPost[]>([]);
+  // Compartilha a posição do scroll com o cabeçalho e a forma azul do fundo.
+  const scrollY = useRef(new Animated.Value(0)).current;
+  // Mantém uma frase diária que também se atualiza caso o app atravesse a meia-noite aberto.
+  const [dailyPhrase, setDailyPhrase] = useState(() => getDailyPhrase());
+
+  // Agenda a próxima troca para a meia-noite local, respeitando o fuso horário do aparelho.
+  useEffect(() => {
+    const now = new Date();
+    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const phraseTimer = setTimeout(() => setDailyPhrase(getDailyPhrase()), nextMidnight.getTime() - now.getTime());
+    return () => clearTimeout(phraseTimer);
+  }, [dailyPhrase]);
+
+  // Sincroniza a foto da Home com o avatar salvo nos dados da conta do Supabase.
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    let isActive = true;
+    const client = requireSupabase();
+    const { data: authListener } = client.auth.onAuthStateChange((_event, session) => {
+      if (isActive) setAvatarId(String(session?.user.user_metadata?.avatar_id ?? '') || null);
+    });
+    void client.auth.getUser().then(({ data, error }) => {
+      if (isActive && !error) setAvatarId(String(data.user?.user_metadata?.avatar_id ?? '') || null);
+    });
+    return () => {
+      isActive = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  // Atualiza o ranking periodicamente para incluir novas publicações e curtidas.
+  useEffect(() => {
+    let isActive = true;
+    let isRefreshing = false;
+    async function refreshTrendingPosts() {
+      if (isRefreshing) return;
+      isRefreshing = true;
+      try {
+        const posts = isSupabaseConfigured
+          ? await loadForumPosts()
+          : JSON.parse((await AsyncStorage.getItem(FORUM_STORAGE_KEY)) ?? '[]') as ForumPost[];
+        if (!isActive) return;
+        const popularPosts = posts
+          .filter((post) => post.likes > 0)
+          .sort((first, second) => second.likes - first.likes || Date.parse(second.createdAt) - Date.parse(first.createdAt))
+          .slice(0, 1);
+        setTrendingPosts(popularPosts);
+      } catch {
+        // A tela inicial continua funcionando mesmo se o fórum estiver temporariamente indisponível.
+      } finally {
+        isRefreshing = false;
+      }
+    }
+    void refreshTrendingPosts();
+    // Atualiza automaticamente também quando uma curtida ou publicação muda no Supabase.
+    const realtimeChannel = isSupabaseConfigured
+      ? requireSupabase()
+          .channel('home-trending-posts')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'curtidas_forum' }, () => void refreshTrendingPosts())
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'postagens_forum' }, () => void refreshTrendingPosts())
+          .subscribe()
+      : null;
+    // Atualiza com frequência mesmo quando o Realtime não estiver habilitado no Supabase.
+    const refreshTimer = setInterval(() => void refreshTrendingPosts(), isSupabaseConfigured ? 30_000 : 5_000);
+    return () => {
+      isActive = false;
+      clearInterval(refreshTimer);
+      if (realtimeChannel) void requireSupabase().removeChannel(realtimeChannel);
+    };
+  }, []);
+  // A publicação exibida é sempre a que tem mais curtidas no ranking atual.
+  const trendingPost = trendingPosts[0];
   // Troca para a imagem anterior do carrossel; se estiver na primeira, volta para a última (efeito circular).
   function bannerAnterior() {
     setBannerIndex((atual) => (atual === 0 ? BANNERS.length - 1 : atual - 1));
@@ -30,18 +158,31 @@ export default function HomeScreen() {
   // Monta a interface visual da tela.
   return (
     // View mais externa: ocupa a tela inteira e serve de base para a curva decorativa no rodapé.
-    <View style={styles.screen}>
-      {/* Cabeçalho fixo, igual em todas as abas internas. */}
-      <Header />
+    <ThemeSurface><View style={styles.screen}>
+      {/* Forma azul decorativa renderizada primeiro para ficar atrás do conteúdo da tela. */}
+      <Animated.View pointerEvents="none" style={[styles.wave, {
+        // Faz a área azul inferior crescer conforme a faixa azul do topo encolhe.
+        height: scrollY.interpolate({ inputRange: [0, 220], outputRange: [140, 330], extrapolate: 'clamp' })
+      }]} />
 
       {/* ScrollView permite rolar o conteúdo caso ele não caiba na altura da tela. */}
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <Animated.ScrollView
+        contentContainerStyle={styles.content}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
+        scrollEventThrottle={16}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* O cabeçalho rola junto com a tela e encolhe antes de sair da área visível. */}
+        <View style={styles.scrollHeader}>
+          <Header scrollY={scrollY} />
+        </View>
 
-        {/* Bloco do avatar: um círculo cinza representando a foto de perfil (ainda sem foto real). */}
+        {/* Mantém a foto de perfil no topo do conteúdo da Home. */}
         <View style={styles.avatarWrapper}>
           <View style={styles.avatar}>
-            {/* Usa um emoji simples como ícone provisório de perfil. */}
-            <Text style={styles.avatarIcon}>👤</Text>
+            {avatarId && PROFILE_AVATARS[avatarId]
+              ? <Image source={PROFILE_AVATARS[avatarId]} style={styles.avatarImage} />
+              : <Ionicons name="person" size={28} color={colors.white} />}
           </View>
         </View>
 
@@ -73,29 +214,50 @@ export default function HomeScreen() {
         {/* Linha com os dois cartões de resumo, lado a lado. */}
         <View style={styles.cardsRow}>
 
-          {/* Primeiro cartão: mostra a meta do dia em porcentagem. */}
+          {/* Primeiro cartão: mantém a meta do dia em porcentagem. */}
           <Card>
             <Text style={styles.cardTitle}>Meta do Dia</Text>
-            {/* Agrupa o emoji de alvo e o número da porcentagem na mesma linha. */}
+            {/* Agrupa o ícone e a porcentagem da meta na mesma linha. */}
             <View style={styles.cardInline}>
               <Text style={styles.cardEmoji}>🎯</Text>
               <Text style={styles.cardValue}>70%</Text>
             </View>
           </Card>
 
-          {/* Segundo cartão: mostra a sequência de dias seguidos se exercitando. */}
+          {/* Segundo cartão: mostra a frase que vale para o dia atual. */}
           <Card>
-            <Text style={styles.cardTitle}>Sequência</Text>
-            <Text style={styles.cardText}>3 dias seguidos se exercitando 🔥</Text>
+            <Text style={styles.cardTitle}>Frase do Dia</Text>
+            <Text style={styles.dailyPhrase}>“{dailyPhrase}”</Text>
           </Card>
 
         </View>
-      </ScrollView>
 
-      {/* Forma azul arredondada, só decorativa, criando a curva no rodapé da tela. */}
-      {/* pointerEvents="none" garante que ela não bloqueie toques nos elementos abaixo dela. */}
-      <View pointerEvents="none" style={styles.wave} />
-    </View>
+        {/* Mostra a publicação que está em primeiro lugar no ranking de curtidas. */}
+        {trendingPost ? (
+            <Pressable accessibilityRole="button" accessibilityLabel="Abrir publicação em alta no fórum" onPress={() => router.push('/tabs/forum')} style={styles.trendingCard}>
+              <View style={styles.trendingHeading}>
+                <View style={styles.trendingTitleRow}>
+                  <Ionicons name="trending-up" size={19} color={colors.primary} />
+                  <Text style={styles.trendingTitle}>Em alta no fórum</Text>
+                </View>
+                <Text style={styles.trendingPosition}>Mais curtida</Text>
+              </View>
+              <View style={styles.trendingAuthorRow}>
+                <Text numberOfLines={1} style={styles.trendingAuthor}>{trendingPost.authorName || 'Pessoa usuária'}</Text>
+                <Text style={styles.trendingCategory}>{trendingPost.category}</Text>
+              </View>
+              {trendingPost.text ? <Text numberOfLines={3} style={styles.trendingText}>{trendingPost.text}</Text> : null}
+              {trendingPost.imageUri ? <Image source={{ uri: trendingPost.imageUri }} style={styles.trendingImage} /> : null}
+              <View style={styles.trendingFooter}>
+                <Ionicons name="heart" size={17} color="#E94B68" />
+                <Text style={styles.trendingLikes}>{trendingPost.likes} curtidas</Text>
+                <Text style={styles.trendingLink}>Ver no fórum</Text>
+              </View>
+            </Pressable>
+        ) : null}
+      </Animated.ScrollView>
+
+    </View></ThemeSurface>
   );
 }
 
@@ -113,22 +275,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16
   },
+  // Compensa o recuo interno do ScrollView para o cabeçalho continuar de ponta a ponta.
+  scrollHeader: {
+    marginHorizontal: -20
+  },
   // Alinha o círculo do avatar à esquerda da tela.
   avatarWrapper: {
-    alignItems: 'flex-start'
+    alignItems: 'flex-start',
+    marginHorizontal: 20
   },
-  // Círculo cinza claro que serve de fundo para o ícone de perfil.
+  // Círculo que recorta a foto de perfil e mantém o ícone alinhado no estado vazio.
   avatar: {
     alignItems: 'center',
     backgroundColor: '#E4E7EC',
     borderRadius: 28,
     height: 56,
     justifyContent: 'center',
+    overflow: 'hidden',
     width: 56
   },
-  // Tamanho do emoji usado como ícone de perfil.
-  avatarIcon: {
-    fontSize: 26
+  // Preenche o círculo com a imagem do avatar selecionado no perfil.
+  avatarImage: {
+    height: '100%',
+    width: '100%'
   },
   // Container do carrossel: cantos arredondados e "overflow: hidden" corta a imagem nas bordas.
   bannerCard: {
@@ -181,21 +350,29 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     fontWeight: '700'
   },
-  // Alinha o emoji e o valor lado a lado, dentro do cartão de meta.
+  // Alinha o ícone e o valor da meta diária em uma linha.
   cardInline: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 6
   },
-  // Tamanho do emoji usado como ícone dentro dos cartões.
+  // Tamanho do ícone usado ao lado da meta diária.
   cardEmoji: {
     fontSize: 22
   },
-  // Estilo do número de porcentagem no cartão de meta do dia.
+  // Destaque numérico da meta diária.
   cardValue: {
     color: colors.text,
     fontSize: 18,
     fontWeight: '800'
+  },
+  // Mantém a frase diária legível dentro do cartão menor da Home.
+  dailyPhrase: {
+    alignSelf: 'stretch',
+    color: colors.text,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'center'
   },
   // Estilo do texto descritivo no cartão de sequência.
   cardText: {
@@ -203,6 +380,39 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     textAlign: 'center'
   },
+  // Cartão de destaque que segue o estilo azul e arredondado do restante da Home.
+  trendingCard: {
+    backgroundColor: '#F0F7FF',
+    borderColor: '#D4E7FA',
+    borderRadius: 18,
+    borderWidth: 1,
+    gap: 10,
+    padding: 15
+  },
+  // Cabeçalho do destaque com chamada e indicação do ranking.
+  trendingHeading: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  // Alinha o ícone de tendência ao título do cartão.
+  trendingTitleRow: { alignItems: 'center', flexDirection: 'row', gap: 7 },
+  // Título do cartão de publicações em alta.
+  trendingTitle: { color: colors.primary, fontSize: 15, fontWeight: '800' },
+  // Indica que esta é a publicação com maior número de curtidas.
+  trendingPosition: { color: colors.mutedText, fontSize: 11 },
+  // Linha que identifica autor e categoria da publicação.
+  trendingAuthorRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  // Nome da pessoa que publicou.
+  trendingAuthor: { color: colors.text, flex: 1, fontSize: 12, fontWeight: '700' },
+  // Categoria pequena ao lado do autor.
+  trendingCategory: { color: colors.primary, fontSize: 10, fontWeight: '700' },
+  // Trecho do conteúdo da publicação destacada.
+  trendingText: { color: colors.text, fontSize: 13, lineHeight: 19 },
+  // Foto opcional anexada à publicação destacada.
+  trendingImage: { borderRadius: 12, height: 150, width: '100%' },
+  // Rodapé com curtidas e acesso ao fórum.
+  trendingFooter: { alignItems: 'center', flexDirection: 'row', gap: 5 },
+  // Quantidade de curtidas da publicação.
+  trendingLikes: { color: colors.text, fontSize: 12, fontWeight: '700' },
+  // Indica que tocar no cartão abre o fórum.
+  trendingLink: { color: colors.primary, fontSize: 11, fontWeight: '700', marginLeft: 'auto' },
   // Forma azul arredondada no rodapé: um retângulo alto com os cantos superiores bem arredondados,
   // criando o efeito de "curva"/"onda" quando posicionado abaixo da borda visível da tela.
   wave: {

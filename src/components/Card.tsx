@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, useColorScheme } from 'react-native';
 import { colors } from '../constants/colors';
 
 // Define quais propriedades o componente Card aceita: apenas o conteúdo de dentro dele.
@@ -8,8 +8,9 @@ type CardProps = { children: ReactNode };
 // Cartão genérico: fundo azul clarinho, cantos arredondados e uma sombra leve.
 // Serve de "molde" para os blocos de informação da Home, como "Meta do Dia" e "Sequência".
 export function Card({ children }: CardProps) {
+  const isDark = useColorScheme() === 'dark';
   // Desenha uma View estilizada e coloca dentro dela o que for passado como "children".
-  return <View style={styles.card}>{children}</View>;
+  return <View style={[styles.card, isDark && styles.cardDark]}>{children}</View>;
 }
 
 // Agrupa o estilo do cartão em um só lugar.
@@ -36,4 +37,6 @@ const styles = StyleSheet.create({
     // Sombra equivalente para Android (iOS ignora esta propriedade).
     elevation: 2,
   },
+  // Keeps summary cards readable when the app-wide dark appearance is active.
+  cardDark: { backgroundColor: '#202A35' },
 });

@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors } from '../../constants/colors';
+import { ThemeSurface } from '../../components/ThemeSurface';
 import { sendMessageToAI } from '../../services/aiService';
 import type { AiMessage } from '../../services/aiService';
 import { getQuestionnairePreferencesForAI } from '../../services/questionnaireService';
@@ -50,11 +51,11 @@ export default function IaScreen() {
 
   return (
     // Ajusta a tela quando o teclado aparece, principalmente no iOS.
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <ThemeSurface><KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       {/* Mostra o nome da assistente e o assunto da conversa. */}
       <View style={styles.titleRow}>
         <View style={styles.sparkle}>
-          <Image source={require('../../../assets/logoIA.png')} style={styles.logo} resizeMode="contain" />
+          <Image source={require('../../../assets/logoIA.png')} style={styles.logo} resizeMode="cover" />
         </View>
         <View style={styles.titleCopy}>
           <Text style={styles.title}>NutriIA</Text>
@@ -83,7 +84,10 @@ export default function IaScreen() {
           // Mensagens da pessoa ficam à direita; respostas da IA ficam à esquerda.
           <View key={item.id} style={[styles.messageRow, item.role === 'user' && styles.userMessageRow]}>
             {item.role === 'assistant' ? (
-              <Image source={require('../../../assets/logoIA.png')} style={styles.messageLogo} resizeMode="contain" />
+              // Mantém a foto da assistente circular também ao lado das respostas.
+              <View style={styles.messageAvatar}>
+                <Image source={require('../../../assets/logoIA.png')} style={styles.messageLogo} resizeMode="cover" />
+              </View>
             ) : null}
             <View style={[styles.bubble, item.role === 'user' ? styles.userBubble : styles.assistantBubble]}>
               <Text style={[styles.bubbleText, item.role === 'user' && styles.userBubbleText]}>{item.content}</Text>
@@ -118,7 +122,7 @@ export default function IaScreen() {
           <Ionicons name="arrow-up" size={21} color={colors.white} />
         </Pressable>
       </View>
-    </KeyboardAvoidingView>
+    </KeyboardAvoidingView></ThemeSurface>
   );
 }
 
@@ -150,6 +154,7 @@ const styles = StyleSheet.create({
     width: 40
   },
   logo: {
+    borderRadius: 16,
     height: 32,
     width: 32
   },
@@ -240,9 +245,18 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end'
   },
   // Espaço abaixo do ícone da IA para alinhá-lo com o balão.
-  messageLogo: {
+  // Fundo circular que recorta a imagem da NutriIA nas mensagens.
+  messageAvatar: {
+    backgroundColor: colors.white,
+    borderRadius: 18,
     height: 36,
     marginBottom: 8,
+    overflow: 'hidden',
+    width: 36
+  },
+  // Imagem da assistente ocupa todo o círculo do avatar.
+  messageLogo: {
+    height: 36,
     width: 36
   },
   // Formato comum de todas as mensagens.

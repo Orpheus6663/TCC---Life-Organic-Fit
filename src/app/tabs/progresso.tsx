@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../../constants/colors';
+import { ThemeSurface } from '../../components/ThemeSurface';
 
 const weeklyData = {
   'Última semana': [35, 58, 44, 72, 50, 83, 62],
@@ -21,7 +22,7 @@ export default function ProgressoScreen() {
   }
 
   return (
-    <View style={styles.screen}>
+    <ThemeSurface><View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Identifica os dados mostrados como o resumo de hoje. */}
         <View style={styles.todayRow}>
@@ -81,7 +82,7 @@ export default function ProgressoScreen() {
         </View>
         <Text style={styles.demoNote}>Valores ilustrativos — seus dados serão exibidos quando forem conectados.</Text>
       </ScrollView>
-    </View>
+    </View></ThemeSurface>
   );
 }
 

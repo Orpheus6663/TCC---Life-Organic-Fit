@@ -1,11 +1,12 @@
 ﻿import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import { router } from 'expo-router';
-import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/Button';
+import { ThemeSurface } from '../../components/ThemeSurface';
 import { colors } from '../../constants/colors';
 import { isSupabaseConfigured, requireSupabase } from '../../lib/supabase';
-import { signOut } from '../../services/authService';
+import { deleteAccount, signOut } from '../../services/authService';
 
 const avatars = [
   { id: 'vermelho', source: require('../../../assets/perfil/vermelho.png') },
@@ -17,13 +18,13 @@ const avatars = [
 ] as const;
 
 const profileOptions = [
-  { icon: 'settings-outline', label: 'Configurações do app', opensSettings: true },
-  { icon: 'lock-closed-outline', label: 'Privacidade' },
-  { icon: 'construct-outline', label: 'Gerenciar Conta', opensSettings: true },
-  { icon: 'document-text-outline', label: 'Termos de uso' },
-  { icon: 'notifications-outline', label: 'Notificação' },
-  { icon: 'sunny-outline', label: 'Modo de tela' },
-  { icon: 'trash-outline', label: 'Excluir conta' },
+  { icon: 'settings-outline', label: 'Configurações do app', section: 'settings' },
+  { icon: 'lock-closed-outline', label: 'Privacidade', section: 'privacy' },
+  { icon: 'construct-outline', label: 'Gerenciar Conta', section: 'account' },
+  { icon: 'document-text-outline', label: 'Termos de uso', section: 'terms' },
+  { icon: 'notifications-outline', label: 'Notificação', section: 'notifications' },
+  { icon: 'sunny-outline', label: 'Modo de tela', section: 'appearance' },
+  { icon: 'trash-outline', label: 'Excluir conta', section: 'delete' },
 ] as const;
 
 export default function PerfilScreen() {
@@ -106,10 +107,36 @@ export default function PerfilScreen() {
     }
   }
 
+  // Confirma e apaga permanentemente a conta e os dados vinculados a ela.
+  function confirmDeleteAccount() {
+    if (!isSupabaseConfigured || !email) {
+      setError('Entre na sua conta para solicitar a exclusão.');
+      return;
+    }
+    Alert.alert('Excluir conta?', 'Sua conta, publicações, comentários, refeições e fotos serão removidos permanentemente.', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Excluir conta', style: 'destructive', onPress: () => void performAccountDeletion() },
+    ]);
+  }
+
+  // Chama a função protegida no servidor e retorna à tela de entrada após a exclusão.
+  async function performAccountDeletion() {
+    setIsSubmitting(true);
+    setError('');
+    try {
+      await deleteAccount();
+      router.replace('/auth/login');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Não foi possível excluir a conta.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   const selectedAvatar = avatars.find((avatar) => avatar.id === avatarId);
 
   return (
-    <View style={styles.screen}>
+    <ThemeSurface><View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.accountCard}>
           <Pressable accessibilityRole="button" accessibilityLabel="Escolher foto de perfil" onPress={() => setIsAvatarPickerOpen(true)} style={styles.avatar}>
@@ -139,18 +166,19 @@ export default function PerfilScreen() {
         </View>
 
         <View style={styles.optionsCard}>
-          {profileOptions.map((option, index) => (
-            option.opensSettings
-              ? <Pressable key={option.label} accessibilityRole="button" onPress={() => router.push('/configuracoes')} style={[styles.optionRow, styles.optionDivider]}>
-                <Ionicons name={option.icon} size={21} color="#303030" />
-                <Text style={styles.optionLabel}>{option.label}</Text>
-                <Ionicons name="chevron-forward" size={17} color="#777777" />
-              </Pressable>
-              : <View key={option.label} style={[styles.optionRow, index < profileOptions.length - 1 && styles.optionDivider]}>
-                <Ionicons name={option.icon} size={21} color="#303030" />
-                <Text style={styles.optionLabel}>{option.label}</Text>
-              </View>
-          ))}
+          {profileOptions.map((option, index) => <Pressable
+            key={option.label}
+            accessibilityRole="button"
+            disabled={isSubmitting}
+            onPress={() => option.section === 'delete'
+              ? confirmDeleteAccount()
+              : router.push({ pathname: '/preferencias', params: { section: option.section } })}
+            style={[styles.optionRow, index < profileOptions.length - 1 && styles.optionDivider]}
+          >
+            <Ionicons name={option.icon} size={21} color={option.section === 'delete' ? colors.danger : '#303030'} />
+            <Text style={[styles.optionLabel, option.section === 'delete' && styles.deleteLabel]}>{option.label}</Text>
+            {option.section !== 'delete' ? <Ionicons name="chevron-forward" size={17} color="#777777" /> : null}
+          </Pressable>)}
         </View>
       </ScrollView>
       <Modal visible={isAvatarPickerOpen} transparent animationType="fade" onRequestClose={() => setIsAvatarPickerOpen(false)}>
@@ -168,7 +196,7 @@ export default function PerfilScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </View></ThemeSurface>
   );
 }
 
@@ -272,6 +300,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16
   },
+  deleteLabel: { color: colors.danger },
   logoutCard: {
     backgroundColor: '#F0F0F0',
     borderRadius: 22,

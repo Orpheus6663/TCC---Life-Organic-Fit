@@ -4,6 +4,7 @@ import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleShee
 import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import { colors } from '../../constants/colors';
+import { ThemeSurface } from '../../components/ThemeSurface';
 import { signIn } from '../../services/authService';
 import { hasCompletedQuestionnaire } from '../../services/questionnaireService';
 
@@ -40,7 +41,7 @@ export default function LoginScreen() {
   // Monta a interface da tela.
   return (
     // Move o conteúdo para cima quando o teclado abre no iOS.
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.screen}>
+    <ThemeSurface><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.screen}>
 
       {/* Cria o cabeçalho com fundo branco e as faixas diagonais por cima. */}
       <View style={styles.hero}>
@@ -106,7 +107,7 @@ export default function LoginScreen() {
           
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardAvoidingView></ThemeSurface>
   );
 }
 

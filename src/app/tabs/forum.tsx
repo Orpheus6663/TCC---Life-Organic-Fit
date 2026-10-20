@@ -6,8 +6,9 @@ import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useState } from 'react';
 import { Alert, Image, ImageSourcePropType, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors } from '../../constants/colors';
+import { ThemeSurface } from '../../components/ThemeSurface';
 import { isSupabaseConfigured, requireSupabase } from '../../lib/supabase';
-import { createForumComment, createForumPost, deleteForumComment, deleteForumPost, loadForumPosts, toggleForumLike } from '../../services/forumService';
+import { createForumComment, createForumPost, deleteForumComment, deleteForumPost, loadForumPosts, toggleForumLike, uploadForumImage } from '../../services/forumService';
 
 // Chave fixa usada para salvar e recuperar os posts neste dispositivo.
 const STORAGE_KEY = '@lifeorganicfit/forum-posts-v1';
@@ -41,6 +42,9 @@ type ForumPost = {
   id: string;
   // Texto da publicação; pode ficar vazio se houver uma foto.
   text: string;
+  category?: string;
+  // Indica se a publicação aceita novos comentários.
+  commentsEnabled?: boolean;
   authorName?: string;
   authorId?: string;
   avatarId?: string;
@@ -83,7 +87,6 @@ export default function ForumScreen() {
   const [posts, setPosts] = useState<ForumPost[]>([]);
   const [userName, setUserName] = useState('Pessoa usuária');
   const [avatarId, setAvatarId] = useState<string | undefined>();
-  const [hasSubscription, setHasSubscription] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   // Impede salvar a lista vazia antes de terminar a leitura inicial do armazenamento.
   const [isLoaded, setIsLoaded] = useState(false);
@@ -103,6 +106,23 @@ export default function ForumScreen() {
   const [reportingPostId, setReportingPostId] = useState<string | null>(null);
   // Guarda as publicações já denunciadas neste uso da tela.
   const [reportedPostIds, setReportedPostIds] = useState<string[]>([]);
+  // Guarda o texto usado para localizar publicações pelo conteúdo ou autor.
+  const [searchText, setSearchText] = useState('');
+  // Mantém selecionado o filtro atual do feed.
+  const [selectedCategory, setSelectedCategory] = useState('Todos');
+  // Mantém a categoria escolhida para a nova publicação.
+  const [postCategory, setPostCategory] = useState('Receita');
+  // Controla a permissão de comentários da publicação que está sendo criada.
+  const [commentsEnabled, setCommentsEnabled] = useState(true);
+  // Define os temas disponíveis no feed e no formulário de publicação.
+  const categories = ['Todos', 'Receitas', 'Dicas', 'Treinos', 'Alimentação', 'Conquistas'];
+  const postCategories = ['Receita', 'Refeição', 'Treino', 'Dica', 'Conquista'];
+  // Aplica busca e categoria selecionada antes de mostrar os cartões.
+  const visiblePosts = posts.filter((post) => {
+    const matchesSearch = `${post.text} ${post.authorName ?? ''}`.toLowerCase().includes(searchText.toLowerCase());
+    const matchesCategory = selectedCategory === 'Todos' || post.category?.toLowerCase() === selectedCategory.toLowerCase().replace(/s$/, '') || (selectedCategory === 'Receitas' && post.category === 'Receita');
+    return matchesSearch && matchesCategory;
+  });
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -112,14 +132,12 @@ export default function ForumScreen() {
       setUserName(getProfileName(user));
       setUserId(user?.id ?? null);
       setAvatarId(typeof user?.user_metadata?.avatar_id === 'string' ? user.user_metadata.avatar_id : undefined);
-      setHasSubscription(user?.app_metadata?.subscription_active === true);
     });
     void client.auth.getUser().then(({ data, error }) => {
       if (!error && data.user) {
         setUserName(getProfileName(data.user));
         setUserId(data.user.id);
         setAvatarId(typeof data.user.user_metadata?.avatar_id === 'string' ? data.user.user_metadata.avatar_id : undefined);
-        setHasSubscription(data.user.app_metadata?.subscription_active === true);
       }
     });
     return () => authListener.subscription.unsubscribe();
@@ -163,10 +181,6 @@ export default function ForumScreen() {
 
   // Abre a galeria do celular para escolher uma foto para a publicação.
   async function choosePhoto() {
-    if (!hasSubscription) {
-      Alert.alert('Recurso para assinantes', 'Assine o Life Organic Fit para adicionar fotos da galeria às suas publicações.');
-      return;
-    }
     try {
       // Abre o seletor de fotos, permite corte e reduz o tamanho da imagem escolhida.
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -201,12 +215,10 @@ export default function ForumScreen() {
         Alert.alert('Entre na sua conta', 'Faça login para publicar no fórum.');
         return;
       }
-      if (photoUri) {
-        Alert.alert('Foto indisponível', 'As tabelas do fórum ainda não têm um campo para armazenar fotos. Publique somente texto por enquanto.');
-        return;
-      }
       try {
-        await createForumPost({ text, userId, authorName: userName, avatarId });
+        // Envia a foto ao armazenamento do Supabase e salva o endereço no post.
+        const imageUrl = photoUri ? await uploadForumImage(photoUri, userId) : undefined;
+        await createForumPost({ text, userId, authorName: userName, avatarId, category: postCategory, commentsEnabled, imageUrl });
         const loadedPosts = await loadForumPosts();
         setPosts(loadedPosts);
       } catch (error) {
@@ -215,6 +227,7 @@ export default function ForumScreen() {
       }
       setPostText('');
       setPhotoUri(null);
+      setCommentsEnabled(true);
       setIsComposerOpen(false);
       return;
     }
@@ -222,6 +235,8 @@ export default function ForumScreen() {
     const post: ForumPost = {
       id: `${Date.now()}`,
       text,
+      category: postCategory,
+      commentsEnabled,
       authorName: userName,
       authorId: userId ?? 'local-device',
       avatarId,
@@ -237,6 +252,7 @@ export default function ForumScreen() {
     setPostText('');
     // Remove a foto selecionada da prévia.
     setPhotoUri(null);
+    setCommentsEnabled(true);
     // Fecha o formulário depois que a publicação foi criada.
     setIsComposerOpen(false);
   }
@@ -320,6 +336,8 @@ export default function ForumScreen() {
     const text = commentText.trim();
     // Não cria comentário vazio.
     if (!text) return;
+    // Bloqueia comentários para uma publicação que não os permite.
+    if (posts.find((post) => post.id === postId)?.commentsEnabled === false) return;
     if (isSupabaseConfigured) {
       if (!userId) {
         Alert.alert('Entre na sua conta', 'Faça login para comentar no fórum.');
@@ -382,8 +400,41 @@ export default function ForumScreen() {
   return (
     // Esta camada evita que o teclado cubra os campos quando a pessoa escreve.
     // O style ocupa a tela toda e o behavior adiciona ajuste de teclado somente no iOS.
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      {/* Cabeçalho com a marca, compartilhado com as outras abas. */}
+    <ThemeSurface><KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {isComposerOpen ? (
+        <>
+          {/* Cabeçalho da tela de criação com ação para retornar ao feed. */}
+          <View style={styles.composerHeading}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Voltar ao fórum" onPress={() => setIsComposerOpen(false)} style={styles.backButton}><Ionicons name="arrow-back" size={24} color={colors.text} /></Pressable>
+            <Text style={styles.composerTitle}>Criar publicação</Text>
+            <View style={styles.backButton} />
+          </View>
+          {/* Formulário rolável para caber em telas menores e com o teclado aberto. */}
+          <ScrollView contentContainerStyle={styles.composerPage} keyboardShouldPersistTaps="handled">
+            <View style={styles.anonymousRow}>
+              <View style={styles.avatar}>{avatarId && avatarSources[avatarId] ? <Image source={avatarSources[avatarId]} style={styles.avatarImage} /> : <Ionicons name="person" size={18} color={colors.primary} />}</View>
+              <Text style={styles.anonymousLabel}>{userName}</Text>
+            </View>
+            <Text style={styles.formPrompt}>O que você gostaria de compartilhar?</Text>
+            {/* Seleção compacta do tipo de publicação. */}
+            <ScrollView horizontal style={styles.categoryChoicesBar} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryChoices}>
+              {postCategories.map((category, index) => <Pressable key={category} onPress={() => setPostCategory(category)} style={[styles.categoryChoice, postCategory === category && styles.categoryChoiceActive]}><Ionicons name={(['restaurant-outline', 'cafe-outline', 'barbell-outline', 'bulb-outline', 'trophy-outline'] as const)[index]} size={20} color={postCategory === category ? colors.white : colors.primary} /><Text style={[styles.categoryChoiceText, postCategory === category && styles.categoryChoiceTextActive]}>{category}</Text></Pressable>)}
+            </ScrollView>
+            <View style={styles.composerInputWrap}>
+              <TextInput accessibilityLabel="Escreva sua publicação" multiline maxLength={1000} onChangeText={setPostText} placeholder="Escreva aqui..." placeholderTextColor={colors.mutedText} style={styles.postInput} value={postText} />
+              <Text style={styles.characterCount}>{postText.length}/1000</Text>
+            </View>
+            {photoUri ? <View style={styles.photoPreviewWrap}><Image source={{ uri: photoUri }} style={styles.photoPreview} /><Pressable onPress={() => setPhotoUri(null)} style={styles.removePhoto}><Ionicons name="close" size={18} color={colors.white} /></Pressable></View> : null}
+            <Pressable accessibilityRole="button" onPress={choosePhoto} style={styles.addPhoto}><Ionicons name="image-outline" size={21} color={colors.primary} /><Text style={styles.addPhotoText}>{photoUri ? 'Trocar foto' : 'Adicionar foto'}</Text><Text style={styles.addPhotoHint}>Toque para escolher uma imagem</Text></Pressable>
+            {/* Controle interativo que define se a nova publicação aceita comentários. */}
+            <Pressable accessibilityRole="switch" accessibilityState={{ checked: commentsEnabled }} accessibilityLabel="Permitir comentários" onPress={() => setCommentsEnabled((enabled) => !enabled)} style={styles.commentPermission}>
+              <Ionicons name="lock-closed" size={18} color={colors.primary} /><Text style={styles.anonymousLabel}>Permitir comentários</Text>
+              <View style={[styles.toggleTrack, commentsEnabled && styles.toggleOn]}><View style={[styles.toggleKnob, commentsEnabled && styles.toggleKnobOn]} /></View>
+            </Pressable>
+            <Pressable accessibilityRole="button" disabled={!postText.trim() && !photoUri} onPress={publishPost} style={[styles.publishFull, !postText.trim() && !photoUri && styles.disabledButton]}><Text style={styles.publishButtonText}>Publicar</Text></Pressable>
+          </ScrollView>
+        </>
+      ) : <>
       {/* Cabeçalho local: título, descrição e botão que abre ou fecha o formulário. */}
       <View style={styles.heading}>
         {/* Ícone decorativo que identifica a área de conversa da comunidade. */}
@@ -394,6 +445,11 @@ export default function ForumScreen() {
           <Text style={styles.subtitle}>Converse e compartilhe com a comunidade</Text>
         </View>
       </View>
+
+      {/* Campo de busca para filtrar pelo texto da publicação ou nome de quem publicou. */}
+      <View style={styles.searchWrap}><Ionicons name="search-outline" size={18} color={colors.mutedText} /><TextInput accessibilityLabel="Pesquisar no fórum" onChangeText={setSearchText} placeholder="Pesquisar no fórum..." placeholderTextColor={colors.mutedText} style={styles.searchInput} value={searchText} /></View>
+      {/* Faixa horizontal de temas com altura fixa para os botões não se esticarem. */}
+      <ScrollView horizontal style={styles.categoryFilterBar} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryFilters}>{categories.map((category) => <Pressable key={category} onPress={() => setSelectedCategory(category)} style={[styles.categoryFilter, selectedCategory === category && styles.categoryFilterActive]}><Text style={[styles.categoryFilterText, selectedCategory === category && styles.categoryFilterTextActive]}>{category}</Text></Pressable>)}</ScrollView>
 
       {/* Feed rolável; os toques no teclado não fecham os campos automaticamente. */}
       <ScrollView contentContainerStyle={styles.feed} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
@@ -427,9 +483,9 @@ export default function ForumScreen() {
             ) : null}
             <View style={styles.composerActions}>
               {/* Abre a galeria e muda o texto do botão se já houver uma imagem anexada. */}
-              <Pressable accessibilityRole="button" disabled={isSupabaseConfigured} onPress={choosePhoto} style={styles.photoButton}>
-                <Ionicons name="image-outline" size={19} color={isSupabaseConfigured ? colors.mutedText : colors.primary} />
-                <Text style={styles.photoButtonText}>{isSupabaseConfigured ? 'Fotos indisponíveis' : photoUri ? 'Trocar foto' : hasSubscription ? 'Adicionar foto' : 'Foto da galeria · assinantes'}</Text>
+              <Pressable accessibilityRole="button" onPress={choosePhoto} style={styles.photoButton}>
+                <Ionicons name="image-outline" size={19} color={colors.primary} />
+                <Text style={styles.photoButtonText}>{photoUri ? 'Trocar foto' : 'Adicionar foto'}</Text>
               </Pressable>
               {/* Fica desativado enquanto não houver texto nem foto para publicar. */}
               <Pressable accessibilityRole="button" disabled={!postText.trim() && !photoUri} onPress={publishPost} style={[styles.publishButton, !postText.trim() && !photoUri && styles.disabledButton]}>
@@ -440,7 +496,7 @@ export default function ForumScreen() {
         ) : null}
 
         {!isLoaded ? <Text style={styles.emptyText}>Carregando publicações...</Text> : null}
-        {isLoaded && posts.length === 0 && !isComposerOpen ? (
+        {isLoaded && posts.length === 0 ? (
           // Estado vazio exibido quando ainda não há nenhuma publicação salva.
           <View style={styles.emptyState}>
             <Ionicons name="chatbubble-ellipses-outline" size={34} color={colors.mediumBlue} />
@@ -449,7 +505,7 @@ export default function ForumScreen() {
           </View>
         ) : null}
 
-        {posts.map((post) => (
+        {visiblePosts.map((post) => (
           // Cada cartão representa uma publicação carregada no feed.
           <View key={post.id} style={styles.postCard}>
             {/* Cabeçalho anônimo, data e botão para abrir as opções de denúncia. */}
@@ -477,6 +533,8 @@ export default function ForumScreen() {
             {/* Texto e foto só são renderizados se existirem na publicação. */}
             {post.text ? <Text style={styles.postText}>{post.text}</Text> : null}
             {post.imageUri ? <Image accessibilityLabel="Foto anexada à publicação" source={{ uri: post.imageUri }} style={styles.postImage} resizeMode="cover" /> : null}
+            {/* Etiqueta visual para a categoria da publicação. */}
+            {post.category ? <View style={styles.postCategory}><Text style={styles.postCategoryText}>{post.category}</Text></View> : null}
 
             {reportingPostId === post.id ? (
               // Painel com motivos; tocar em uma opção registra a denúncia local demonstrativa.
@@ -497,13 +555,13 @@ export default function ForumScreen() {
                 <Text style={[styles.actionText, post.likedByMe && styles.likedText]}>{post.likes} Curtir</Text>
               </Pressable>
               {/* Abre ou fecha a conversa desta publicação. */}
-              <Pressable accessibilityRole="button" accessibilityLabel="Mostrar comentários" onPress={() => setExpandedPostId(expandedPostId === post.id ? null : post.id)} style={styles.actionButton}>
+              {post.commentsEnabled !== false ? <Pressable accessibilityRole="button" accessibilityLabel="Mostrar comentários" onPress={() => setExpandedPostId(expandedPostId === post.id ? null : post.id)} style={styles.actionButton}>
                 <Ionicons name="chatbubble-outline" size={19} color={colors.text} />
                 <Text style={styles.actionText}>{post.comments.reduce((count, comment) => count + 1 + comment.replies.length, 0)} Comentários</Text>
-              </Pressable>
+              </Pressable> : null}
             </View>
 
-            {expandedPostId === post.id ? (
+            {expandedPostId === post.id && post.commentsEnabled !== false ? (
               // Área de comentários que só aparece quando a pessoa toca no botão correspondente.
               <View style={styles.commentsSection}>
                 {post.comments.map((comment) => (
@@ -569,7 +627,8 @@ export default function ForumScreen() {
       >
         <Ionicons name={isComposerOpen ? 'close' : 'add'} size={28} color={colors.white} />
       </Pressable>
-    </KeyboardAvoidingView>
+      </>}
+    </KeyboardAvoidingView></ThemeSurface>
   );
 }
 
@@ -579,6 +638,66 @@ const styles = StyleSheet.create({
     backgroundColor: '#F6F8FB',
     flex: 1
   },
+  // Alinha o botão de retorno e o título no cabeçalho da criação.
+  composerHeading: { alignItems: 'center', backgroundColor: colors.white, borderBottomColor: '#EAECF0', borderBottomWidth: 1, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 12, paddingTop: 52, paddingBottom: 14 },
+  // Reserva uma área de toque consistente para voltar.
+  backButton: { alignItems: 'center', justifyContent: 'center', width: 38 },
+  // Dá destaque ao título da tela de criação.
+  composerTitle: { color: colors.text, fontSize: 17, fontWeight: '800' },
+  // Espaça os campos do formulário e mantém uma área rolável.
+  composerPage: { backgroundColor: colors.white, flexGrow: 1, gap: 9, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 28 },
+  // Texto que introduz a seleção de tipo de publicação.
+  formPrompt: { color: colors.text, fontSize: 14, fontWeight: '700', marginTop: 2 },
+  // Centraliza os tipos de publicação em uma faixa horizontal compacta.
+  categoryChoices: { alignItems: 'center', gap: 6 },
+  // Reserva apenas a altura necessária para os temas do formulário.
+  categoryChoicesBar: { flexGrow: 0, flexShrink: 0, height: 54 },
+  // Tamanho compacto de cada opção de tipo de publicação.
+  categoryChoice: { alignItems: 'center', borderColor: '#D7E5F5', borderRadius: 12, borderWidth: 1, gap: 4, height: 54, justifyContent: 'center', minWidth: 62, paddingHorizontal: 7 },
+  // Realça o tipo de publicação selecionado.
+  categoryChoiceActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  // Texto pequeno para o rótulo de cada tipo.
+  categoryChoiceText: { color: colors.mutedText, fontSize: 9 },
+  // Define a cor do rótulo selecionado.
+  categoryChoiceTextActive: { color: colors.white },
+  // Contorno e espaço interno do campo principal de texto.
+  composerInputWrap: { borderColor: '#D7E5F5', borderRadius: 12, borderWidth: 1, minHeight: 132, padding: 12 },
+  // Mostra quantos caracteres já foram digitados.
+  characterCount: { alignSelf: 'flex-end', color: colors.mutedText, fontSize: 10 },
+  // Área tracejada que permite escolher uma foto.
+  addPhoto: { alignItems: 'center', borderColor: '#BCD5F2', borderRadius: 12, borderStyle: 'dashed', borderWidth: 1, gap: 5, justifyContent: 'center', minHeight: 78, padding: 10 },
+  // Aparência do rótulo para adicionar foto.
+  addPhotoText: { color: colors.primary, fontSize: 13, fontWeight: '600' },
+  // Instrução abaixo do rótulo de foto.
+  addPhotoHint: { color: colors.mutedText, fontSize: 10 },
+  // Linha para a indicação de permissão de comentários.
+  commentPermission: { alignItems: 'center', borderBottomColor: '#EAECF0', borderBottomWidth: 1, flexDirection: 'row', gap: 10, paddingBottom: 12 },
+  // Aparência desligada do trilho do controle de comentários.
+  toggleTrack: { backgroundColor: '#D0D5DD', borderRadius: 12, height: 24, justifyContent: 'center', marginLeft: 'auto', padding: 2, width: 42 },
+  // Aparência ligada do trilho do controle de comentários.
+  toggleOn: { backgroundColor: colors.primary },
+  // Botão móvel dentro do trilho do controle.
+  toggleKnob: { alignSelf: 'flex-start', backgroundColor: colors.white, borderRadius: 9, height: 18, width: 18 },
+  // Move o botão para a direita quando comentários estão ativados.
+  toggleKnobOn: { alignSelf: 'flex-end' },
+  // Botão de publicar ocupa a largura útil do formulário.
+  publishFull: { alignItems: 'center', backgroundColor: colors.primary, borderRadius: 24, justifyContent: 'center', marginTop: 4, minHeight: 46 },
+  // Agrupa ícone e campo de busca dentro de uma cápsula.
+  searchWrap: { alignItems: 'center', backgroundColor: '#EEF4FA', borderRadius: 22, flexDirection: 'row', gap: 9, marginHorizontal: 14, marginTop: 10, paddingHorizontal: 12 },
+  // Campo de texto da busca ocupa o espaço restante.
+  searchInput: { color: colors.text, flex: 1, fontSize: 12, minHeight: 38 },
+  // Limita a altura da barra de temas para ela não preencher a tela.
+  categoryFilterBar: { flexGrow: 0, flexShrink: 0, height: 42 },
+  // Mantém os temas pequenos e alinhados no centro da barra.
+  categoryFilters: { alignItems: 'center', gap: 6, paddingHorizontal: 14 },
+  // Formato compacto de cada filtro de tema.
+  categoryFilter: { borderColor: '#D7E5F5', borderRadius: 16, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 5 },
+  // Cor sólida do filtro ativo.
+  categoryFilterActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  // Cor padrão dos nomes dos temas.
+  categoryFilterText: { color: colors.primary, fontSize: 10 },
+  // Texto branco para o tema ativo.
+  categoryFilterTextActive: { color: colors.white },
 
   // Faixa superior que agrupa ícone, textos e botão +.
   heading: {
@@ -809,6 +928,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21
   },
+  // Cápsula azul-clara que identifica o tema no cartão do feed.
+  postCategory: { alignSelf: 'flex-end', backgroundColor: '#EAF4FF', borderRadius: 13, paddingHorizontal: 10, paddingVertical: 4 },
+  // Texto do tema exibido no cartão.
+  postCategoryText: { color: colors.primary, fontSize: 10, fontWeight: '600' },
   // Imagem anexada, cortada para preencher o cartão.
   postImage: {
     backgroundColor: '#EAECF0',

@@ -3,6 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors } from '../constants/colors';
+import { ThemeSurface } from '../components/ThemeSurface';
 import { addFoodToMeal, getFoodCatalog, MEAL_TYPES, type MealType } from '../services/mealService';
 
 function asMealType(value: string | string[] | undefined): MealType {
@@ -36,7 +37,7 @@ export default function AlimentosEscolherScreen() {
   }
 
   return (
-    <View style={styles.screen}>
+    <ThemeSurface><View style={styles.screen}>
       <View style={styles.header}>
         <Pressable accessibilityRole="button" accessibilityLabel="Voltar" onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={25} color={colors.text} />
@@ -69,7 +70,7 @@ export default function AlimentosEscolherScreen() {
           <Text style={styles.paidFeatureText}>Reconhecer pela foto · recurso pago</Text>
         </Pressable>
       </ScrollView>
-    </View>
+    </View></ThemeSurface>
   );
 }
 

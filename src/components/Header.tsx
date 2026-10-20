@@ -1,27 +1,37 @@
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Animated, Image, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../constants/colors';
 
 // Cabeçalho fixo usado no topo de todas as telas internas (Home, Água, Refeições, etc.).
 // Mostra a faixa azul escura, a faixa azul clara e, dentro dela, a logo e o nome da marca.
-export function Header() {
+// Recebe o deslocamento da Home para encolher o cabeçalho junto com o scroll.
+export function Header({ scrollY }: { scrollY?: Animated.Value }) {
+  // Interpola as alturas para a faixa superior diminuir gradualmente ao rolar.
+  const darkBarHeight = scrollY?.interpolate({ inputRange: [0, 120], outputRange: [26, 0], extrapolate: 'clamp' }) ?? 26;
+  const lightBarPadding = scrollY?.interpolate({ inputRange: [0, 120], outputRange: [10, 0], extrapolate: 'clamp' }) ?? 10;
+  const lightBarBottomPadding = scrollY?.interpolate({ inputRange: [0, 120], outputRange: [14, 0], extrapolate: 'clamp' }) ?? 14;
+  const logoHeight = scrollY?.interpolate({ inputRange: [0, 120], outputRange: [50, 18], extrapolate: 'clamp' }) ?? 50;
+  const logoWidth = scrollY?.interpolate({ inputRange: [0, 120], outputRange: [92, 34], extrapolate: 'clamp' }) ?? 92;
+  const brandOpacity = scrollY?.interpolate({ inputRange: [0, 70], outputRange: [1, 0], extrapolate: 'clamp' }) ?? 1;
+  const brandHeight = scrollY?.interpolate({ inputRange: [0, 70], outputRange: [17, 0], extrapolate: 'clamp' }) ?? 17;
+  const brandMargin = scrollY?.interpolate({ inputRange: [0, 70], outputRange: [4, 0], extrapolate: 'clamp' }) ?? 4;
   return (
     // Agrupa as duas faixas coloridas, uma embaixo da outra.
     <View style={styles.container}>
       {/* Faixa fina azul escura no topo, só decorativa (sem texto ou imagem). */}
-      <View style={styles.darkBar} />
+      <Animated.View style={[styles.darkBar, { height: darkBarHeight }]} />
 
       {/* Faixa azul clara logo abaixo, onde ficam a logo e o nome do app. */}
-      <View style={styles.lightBar}>
+      <Animated.View style={[styles.lightBar, { paddingTop: lightBarPadding, paddingBottom: lightBarBottomPadding }]}>
         {/* Imagem da logo (os dois halteres), guardada na pasta assets. */}
-        <Image
+        <Animated.Image
           accessibilityLabel="Logo Life Organic Fit"
           resizeMode="contain"
           source={require('../../assets/lifeOrganicFit.png')}
-          style={styles.logo}
+          style={[styles.logo, { height: logoHeight, width: logoWidth }]}
         />
         {/* Nome do app, escrito por extenso abaixo da logo. */}
-        <Text style={styles.brand}>LIFE ORGANIC FIT</Text>
-      </View>
+        <Animated.Text style={[styles.brand, { height: brandHeight, marginTop: brandMargin, opacity: brandOpacity }]}>LIFE ORGANIC FIT</Animated.Text>
+      </Animated.View>
     </View>
   );
 }

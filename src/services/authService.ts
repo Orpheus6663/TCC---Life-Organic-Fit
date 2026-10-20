@@ -32,6 +32,15 @@ export async function signOut() {
   if (error) throw new Error(error.message);
 }
 
+// Requests permanent account deletion through the authenticated server function.
+export async function deleteAccount() {
+  const client = requireSupabase();
+  const { error } = await client.functions.invoke('delete-account', { body: {} });
+  if (error) throw new Error(error.message || 'Não foi possível excluir a conta.');
+  const { error: signOutError } = await client.auth.signOut({ scope: 'local' });
+  if (signOutError) throw new Error(signOutError.message);
+}
+
 export async function updateProfile(input: { name: string; email: string }) {
   const client = requireSupabase();
   const { data: currentResult, error: currentError } = await client.auth.getUser();

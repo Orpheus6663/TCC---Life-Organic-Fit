@@ -5,6 +5,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text
 import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import { colors } from '../../constants/colors';
+import { ThemeSurface } from '../../components/ThemeSurface';
 import { getPasswordValidationMessage, signUp } from '../../services/authService';
 import { clearRegistrationDraft, restoreRegistrationDraft, type RegistrationDraft } from '../../services/registrationDraft';
 import { isQuestionnaireAnswers, saveQuestionnaire, saveQuestionnaireForUser } from '../../services/questionnaireService';
@@ -174,7 +175,7 @@ export default function QuestionarioScreen() {
 
   let number = 0;
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <ThemeSurface><KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <Text style={styles.heading}>Questionário inicial</Text>
         <Text style={styles.intro}>Leva menos de 5 minutos.</Text>
@@ -247,7 +248,7 @@ export default function QuestionarioScreen() {
           {isSaving ? 'Salvando respostas...' : needsEmailConfirmation ? 'Cadastro concluído' : 'Concluir questionário'}
         </Button>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardAvoidingView></ThemeSurface>
   );
 }
 

@@ -4,6 +4,7 @@ import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleShee
 import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import { colors } from '../../constants/colors';
+import { ThemeSurface } from '../../components/ThemeSurface';
 import { getPasswordValidationMessage } from '../../services/authService';
 import { setRegistrationDraft } from '../../services/registrationDraft';
 
@@ -48,7 +49,7 @@ export default function CadastroScreen() {
   // Monta a interface da tela.
   return (
     // Move o conteúdo para cima quando o teclado abre no iOS.
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.screen}>
+    <ThemeSurface><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.screen}>
 
       {/* Cria o cabeçalho azul com a faixa diagonal azul-clara. */}
       <View style={styles.hero}>
@@ -94,7 +95,7 @@ export default function CadastroScreen() {
           </View>
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </KeyboardAvoidingView></ThemeSurface>
   );
 }
 
