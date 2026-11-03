@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
+import type { AppLanguage } from '../i18n/language';
 
 // Papel permitido para cada mensagem enviada ao endpoint da sua IA.
 export type AiMessage = {
@@ -16,7 +17,7 @@ const DEFAULT_AI_API_URL = Platform.OS === 'web' ? 'http://localhost:8000/chat' 
 const AI_API_URL = process.env.EXPO_PUBLIC_AI_API_URL?.trim() || DEFAULT_AI_API_URL;
 
 // Envia o histórico da conversa para o servidor e espera uma resposta no formato { "reply": "..." }.
-export async function sendMessageToAI(messages: AiMessage[], preferences: Record<string, string | string[]> = {}): Promise<string> {
+export async function sendMessageToAI(messages: AiMessage[], preferences: Record<string, string | string[]> = {}, language: AppLanguage = 'pt-BR'): Promise<string> {
   let response: Response;
   try {
     response = await fetch(AI_API_URL, {
@@ -25,7 +26,7 @@ export async function sendMessageToAI(messages: AiMessage[], preferences: Record
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ messages, preferences }),
+      body: JSON.stringify({ messages, preferences, language }),
     });
   } catch {
     throw new Error(`Não consegui acessar o servidor da IA em ${AI_API_URL}. Confira se o app foi iniciado com npm start e se o aparelho está na mesma rede.`);

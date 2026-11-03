@@ -9,7 +9,6 @@ import type { AppLanguage } from '../i18n/language';
 import { useAppLanguage } from '../i18n/language';
 
 type ScreenMode = 'light' | 'dark';
-type AppLanguage = 'pt-BR' | 'en';
 
 const NOTIFICATIONS_KEY = '@lifeorganicfit/notifications-enabled';
 const SCREEN_MODE_KEY = '@lifeorganicfit/screen-mode';

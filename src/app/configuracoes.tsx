@@ -77,6 +77,12 @@ export default function ConfiguracoesScreen() {
           <Text style={styles.subtitle}>Edite o nome que aparece no fórum e o e-mail da sua conta.</Text>
         </View>
 
+        <Pressable accessibilityRole="button" onPress={() => router.push('/assinatura')} style={styles.subscriptionButton}>
+          <Ionicons name="sparkles" size={20} color={colors.white} />
+          <Text style={styles.subscriptionText}>Gerenciar assinatura</Text>
+          <Ionicons name="chevron-forward" size={19} color={colors.white} />
+        </Pressable>
+
         <View style={styles.formCard}>
           {isLoading ? <ActivityIndicator color={colors.primary} /> : (
             <>
@@ -139,6 +145,22 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 4,
     elevation: 3
+  },
+  subscriptionButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 16,
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingVertical: 16
+  },
+  subscriptionText: {
+    color: colors.white,
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '700'
   },
   helper: {
     color: colors.mutedText,

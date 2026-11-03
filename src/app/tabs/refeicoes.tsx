@@ -2,16 +2,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { colors } from '../../constants/colors';
 import { ThemeSurface } from '../../components/ThemeSurface';
-import { isSupabaseConfigured } from '../../lib/supabase';
-import { getMeals, MEAL_TYPES, type Meal } from '../../services/mealService';
+import { getMeals, MEAL_TYPES, removeMeal, type Meal } from '../../services/mealService';
+import { hasDemoPremium } from '../../services/demoPremiumService';
 
 export default function RefeicoesScreen() {
   const router = useRouter();
   const [meals, setMeals] = useState<Meal[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [removingMealId, setRemovingMealId] = useState<string | null>(null);
 
   const loadMeals = useCallback(async () => {
     setError('');
@@ -25,20 +27,56 @@ export default function RefeicoesScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => {
-    if (!isSupabaseConfigured) {
-      setError('Configure o Supabase e entre na sua conta para registrar alimentos.');
-      setIsLoading(false);
-    } else {
-      void loadMeals();
-    }
+    void loadMeals();
   }, [loadMeals]));
 
   function openFoodPicker(category: string) {
     router.push({ pathname: '/alimentos-escolher', params: { refeicao: category } });
   }
 
-  function showPaidPhotoNotice() {
-    Alert.alert('Identificar alimento pela foto', 'A identificação por imagem vai usar uma API paga e ainda não está conectada.');
+  function confirmRemoveMeal(meal: Meal) {
+    Alert.alert('Remover alimento?', `Deseja remover ${meal.name} do registro de hoje?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Remover', style: 'destructive', onPress: () => void deleteMeal(meal) },
+    ]);
+  }
+
+  async function deleteMeal(meal: Meal) {
+    setRemovingMealId(meal.id);
+    setError('');
+    try {
+      await removeMeal(meal.id);
+      setMeals((current) => current.filter((item) => item.id !== meal.id));
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : 'Não foi possível remover esse alimento.';
+      setError(message);
+      Alert.alert('Não foi possível remover', message);
+    } finally {
+      setRemovingMealId(null);
+    }
+  }
+
+  async function showPaidPhotoNotice() {
+    if (!await hasDemoPremium()) {
+      Alert.alert('Recurso Premium', 'Ative o Premium para tirar uma foto do prato.', [
+        { text: 'Agora não', style: 'cancel' },
+        { text: 'Ver Premium', onPress: () => router.push('/assinatura') },
+      ]);
+      return;
+    }
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permissão da câmera', 'Permita o acesso à câmera para fotografar seu prato.');
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.8 });
+      if (!result.canceled && result.assets[0]?.uri) {
+        Alert.alert('Foto capturada', 'A análise automática do prato ainda não está conectada. A foto não foi enviada nem analisada.');
+      }
+    } catch {
+      Alert.alert('Não foi possível abrir a câmera', 'Confira as permissões e tente novamente.');
+    }
   }
 
   const totalCalories = meals.reduce((sum, meal) => sum + meal.calories, 0);
@@ -77,6 +115,11 @@ export default function RefeicoesScreen() {
                     <Text style={styles.foodDetail}>{meal.detail}</Text>
                   </View>
                   <Text style={styles.foodCalories}>{meal.calories} kcal</Text>
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Remover ${meal.name}`} disabled={removingMealId === meal.id} onPress={() => confirmRemoveMeal(meal)} style={styles.removeButton}>
+                    {removingMealId === meal.id
+                      ? <ActivityIndicator size="small" color={colors.danger} />
+                      : <><Ionicons name="trash-outline" size={16} color={colors.danger} /><Text style={styles.removeButtonText}>Remover</Text></>}
+                  </Pressable>
                 </View>
               ))}
               <Pressable accessibilityRole="button" accessibilityLabel={`Adicionar alimento em ${category}`} onPress={() => openFoodPicker(category)} style={styles.addButton}>
@@ -87,7 +130,7 @@ export default function RefeicoesScreen() {
         })}
         <Pressable accessibilityRole="button" onPress={showPaidPhotoNotice} style={styles.photoLink}>
           <Ionicons name="camera-outline" size={20} color={colors.primary} />
-          <Text style={styles.photoLinkText}>Identificar alimento pela foto · recurso pago</Text>
+          <Text style={styles.photoLinkText}>Identificar alimento pela foto · Premium</Text>
         </Pressable>
       </ScrollView>
     </View></ThemeSurface>
@@ -113,6 +156,8 @@ const styles = StyleSheet.create({
   foodName: { color: colors.text, fontSize: 16, fontWeight: '600' },
   foodDetail: { color: colors.mutedText, fontSize: 12 },
   foodCalories: { color: colors.primary, fontSize: 13, fontWeight: '700' },
+  removeButton: { alignItems: 'center', backgroundColor: '#FEE4E2', borderRadius: 12, flexDirection: 'row', gap: 4, height: 34, justifyContent: 'center', marginLeft: 7, paddingHorizontal: 8 },
+  removeButtonText: { color: colors.danger, fontSize: 10, fontWeight: '700' },
   addButton: { alignItems: 'center', alignSelf: 'flex-start', backgroundColor: '#2498EF', borderRadius: 16, height: 32, justifyContent: 'center', marginTop: 2, width: 32 },
   photoLink: { alignItems: 'center', alignSelf: 'center', flexDirection: 'row', gap: 7, padding: 8 },
   photoLinkText: { color: colors.primary, fontSize: 12, fontWeight: '600' },

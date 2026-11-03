@@ -6,6 +6,7 @@ import { ThemeSurface } from '../../components/ThemeSurface';
 import { sendMessageToAI } from '../../services/aiService';
 import type { AiMessage } from '../../services/aiService';
 import { getQuestionnairePreferencesForAI } from '../../services/questionnaireService';
+import { useAppLanguage } from '../../i18n/language';
 
 // Cada mensagem tem um identificador para a lista e um papel para definir o lado do balão.
 type ChatMessage = AiMessage & { id: number };
@@ -19,6 +20,8 @@ const suggestions = [
 
 // Tela de conversa com a assistente; o envio é feito pelo serviço em src/services/aiService.ts.
 export default function IaScreen() {
+  // Mantém o idioma das respostas da assistente alinhado ao idioma escolhido no aplicativo.
+  const { language } = useAppLanguage();
   // Guarda o texto que a pessoa ainda está escrevendo.
   const [message, setMessage] = useState('');
   // Guarda o histórico visível no chat.
@@ -39,7 +42,7 @@ export default function IaScreen() {
 
     try {
       const preferences = await getQuestionnairePreferencesForAI();
-      const reply = await sendMessageToAI(conversation.map(({ role, content }) => ({ role, content })), preferences);
+      const reply = await sendMessageToAI(conversation.map(({ role, content }) => ({ role, content })), preferences, language);
       setMessages((current) => [...current, { id: Date.now(), role: 'assistant', content: reply }]);
     } catch (error) {
       const errorText = error instanceof Error ? error.message : 'Não foi possível obter uma resposta da IA.';

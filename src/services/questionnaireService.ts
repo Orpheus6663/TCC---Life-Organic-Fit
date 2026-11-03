@@ -48,6 +48,21 @@ export async function hasCompletedQuestionnaire() {
   return true;
 }
 
+export async function getQuestionnaireAnswersForCurrentUser(): Promise<QuestionnaireAnswers | null> {
+  const client = requireSupabase();
+  const { data: userResult, error: userError } = await client.auth.getUser();
+  if (userError) throw new Error(userError.message);
+  if (!userResult.user) return null;
+
+  const { data, error } = await client
+    .from('questionnaires')
+    .select('answers')
+    .eq('user_id', userResult.user.id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return isQuestionnaireAnswers(data?.answers) ? data.answers : null;
+}
+
 export async function saveQuestionnaire(answers: QuestionnaireAnswers) {
   const client = requireSupabase();
   const { data: userResult, error: userError } = await client.auth.getUser();

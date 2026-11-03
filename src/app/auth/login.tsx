@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+﻿import { router } from 'expo-router';
 import { useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/Button';
@@ -10,7 +10,7 @@ import { hasCompletedQuestionnaire } from '../../services/questionnaireService';
 
 // Define a tela usada por pessoas que já possuem uma conta.
 export default function LoginScreen() {
-  // Guarda o e-mail informado.
+  // Guarda a identificação digitada no campo de acesso.
   const [email, setEmail] = useState('');
   // Guarda a senha informada.
   const [password, setPassword] = useState('');
@@ -77,7 +77,7 @@ export default function LoginScreen() {
 
             <Pressable
               accessibilityRole="button"
-              onPress={() => setFormError('A recuperação de senha ainda precisa ser configurada no Supabase.')}
+              onPress={() => router.push('/auth/recuperar-senha')}
               style={({ hovered, pressed }) => (hovered || pressed ? styles.linkPressed : undefined)}
             >
               <Text style={styles.linkUnderline}>esqueci minha senha</Text>
@@ -234,3 +234,4 @@ const styles = StyleSheet.create({
     marginHorizontal: 10
   },
 });
+

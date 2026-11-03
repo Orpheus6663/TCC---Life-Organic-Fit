@@ -1,5 +1,6 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+﻿import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import type { User } from '@supabase/supabase-js';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
@@ -8,7 +9,8 @@ import { Alert, Image, ImageSourcePropType, KeyboardAvoidingView, Platform, Pres
 import { colors } from '../../constants/colors';
 import { ThemeSurface } from '../../components/ThemeSurface';
 import { isSupabaseConfigured, requireSupabase } from '../../lib/supabase';
-import { createForumComment, createForumPost, deleteForumComment, deleteForumPost, loadForumPosts, toggleForumLike, uploadForumImage } from '../../services/forumService';
+import { createForumComment, createForumPost, deleteForumComment, deleteForumPost, loadForumPosts, loadForumReportCount, reportForumPost, toggleForumLike, uploadForumImage } from '../../services/forumService';
+import { removeAdminPost } from '../../services/adminService';
 
 // Chave fixa usada para salvar e recuperar os posts neste dispositivo.
 const STORAGE_KEY = '@lifeorganicfit/forum-posts-v1';
@@ -88,6 +90,8 @@ export default function ForumScreen() {
   const [userName, setUserName] = useState('Pessoa usuária');
   const [avatarId, setAvatarId] = useState<string | undefined>();
   const [userId, setUserId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [pendingReportCount, setPendingReportCount] = useState(0);
   // Impede salvar a lista vazia antes de terminar a leitura inicial do armazenamento.
   const [isLoaded, setIsLoaded] = useState(false);
   // Controla se o formulário para criar publicação está aberto.
@@ -131,17 +135,45 @@ export default function ForumScreen() {
       const user = session?.user ?? null;
       setUserName(getProfileName(user));
       setUserId(user?.id ?? null);
+      setIsAdmin(user?.app_metadata?.role === 'admin');
       setAvatarId(typeof user?.user_metadata?.avatar_id === 'string' ? user.user_metadata.avatar_id : undefined);
     });
-    void client.auth.getUser().then(({ data, error }) => {
+    void client.auth.getUser().then(async ({ data, error }) => {
       if (!error && data.user) {
         setUserName(getProfileName(data.user));
         setUserId(data.user.id);
         setAvatarId(typeof data.user.user_metadata?.avatar_id === 'string' ? data.user.user_metadata.avatar_id : undefined);
+        // Busca JWT atualizado mesmo quando a sessão local ainda não mostra o role.
+        const { data: refreshed, error: refreshError } = await client.auth.refreshSession();
+        if (refreshError) throw refreshError;
+        if (refreshed.session?.user) setIsAdmin(refreshed.session.user.app_metadata?.role === 'admin');
       }
     });
     return () => authListener.subscription.unsubscribe();
   }, []);
+
+  // Mantem a contagem do sino atualizada sem depender do computador de desenvolvimento.
+  useEffect(() => {
+    if (!isSupabaseConfigured || !isAdmin) {
+      setPendingReportCount(0);
+      return;
+    }
+    let isActive = true;
+    const refreshReportCount = async () => {
+      try {
+        const count = await loadForumReportCount();
+        if (isActive) setPendingReportCount(count);
+      } catch {
+        if (isActive) setPendingReportCount(0);
+      }
+    };
+    void refreshReportCount();
+    const interval = setInterval(() => { void refreshReportCount(); }, 30_000);
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+    };
+  }, [isAdmin]);
 
   // Carrega o feed compartilhado do Supabase; sem credenciais mantém o protótipo local.
   useEffect(() => {
@@ -265,7 +297,10 @@ export default function ForumScreen() {
         style: 'destructive',
         onPress: async () => {
           if (isSupabaseConfigured) {
-            try { await deleteForumPost(post.id); }
+            try {
+              if (isAdmin) await removeAdminPost(post.id);
+              else await deleteForumPost(post.id);
+            }
             catch (error) { Alert.alert('Fórum', error instanceof Error ? error.message : 'Não foi possível excluir.'); return; }
           }
           setPosts((current) => current.filter((item) => item.id !== post.id));
@@ -387,14 +422,21 @@ export default function ForumScreen() {
     setReplyingTo(null);
   }
 
-  // Registra a denúncia apenas no protótipo local; a análise real requer um serviço no servidor.
-  function reportPost(postId: string, reason: string) {
-    // Evita registrar a mesma denúncia mais de uma vez nesta tela.
-    setReportedPostIds((current) => current.includes(postId) ? current : [...current, postId]);
-    // Fecha o painel de motivos depois da escolha.
-    setReportingPostId(null);
-    // A denúncia é apenas local neste protótipo e não é enviada para moderação.
-    Alert.alert('Denúncia registrada', `Motivo: ${reason}. No protótipo, a denúncia fica apenas neste aparelho.`);
+  // Persiste a denúncia para que uma pessoa administradora possa analisá-la.
+  async function reportPost(postId: string, reason: string) {
+    if (!userId) {
+      Alert.alert('Entre na sua conta', 'Faça login para enviar uma denúncia.');
+      return;
+    }
+    try {
+      await reportForumPost(postId, userId, reason);
+      setReportedPostIds((current) => current.includes(postId) ? current : [...current, postId]);
+      setReportingPostId(null);
+      Alert.alert('Denúncia registrada', 'A equipe de moderação poderá analisar esta publicação.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Não foi possível enviar a denúncia.';
+      Alert.alert('Não foi possível denunciar', message);
+    }
   }
 
   return (
@@ -444,7 +486,18 @@ export default function ForumScreen() {
           <Text style={styles.title}>Fórum da comunidade</Text>
           <Text style={styles.subtitle}>Converse e compartilhe com a comunidade</Text>
         </View>
+        {isAdmin ? <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Denúncias pendentes: ${pendingReportCount}`}
+          onPress={() => router.push('/admin')}
+          style={styles.notificationButton}
+        >
+          <Ionicons name={pendingReportCount > 0 ? 'notifications' : 'notifications-outline'} size={23} color={colors.primary} />
+          {pendingReportCount > 0 ? <View style={styles.notificationBadge}><Text style={styles.notificationBadgeText}>{pendingReportCount > 99 ? '99+' : pendingReportCount}</Text></View> : null}
+        </Pressable> : null}
       </View>
+
+
 
       {/* Campo de busca para filtrar pelo texto da publicação ou nome de quem publicou. */}
       <View style={styles.searchWrap}><Ionicons name="search-outline" size={18} color={colors.mutedText} /><TextInput accessibilityLabel="Pesquisar no fórum" onChangeText={setSearchText} placeholder="Pesquisar no fórum..." placeholderTextColor={colors.mutedText} style={styles.searchInput} value={searchText} /></View>
@@ -519,12 +572,12 @@ export default function ForumScreen() {
               </View>
               {/* O botão muda o ícone e fica desativado quando a denúncia já foi registrada. */}
               <View style={styles.postHeaderActions}>
-        {post.authorId === (userId ?? 'local-device') ? (
+        {isAdmin || post.authorId === (userId ?? 'local-device') ? (
                   <Pressable accessibilityRole="button" accessibilityLabel="Excluir publicação" onPress={() => deletePost(post)} style={styles.reportButton}>
                     <Ionicons name="trash-outline" size={19} color={colors.danger} />
                   </Pressable>
                 ) : null}
-                {!isSupabaseConfigured ? <Pressable accessibilityRole="button" accessibilityLabel="Denunciar publicação" disabled={reportedPostIds.includes(post.id)} onPress={() => setReportingPostId(reportingPostId === post.id ? null : post.id)} style={styles.reportButton}>
+                {isSupabaseConfigured && post.authorId !== userId ? <Pressable accessibilityRole="button" accessibilityLabel="Denunciar publicação" disabled={reportedPostIds.includes(post.id)} onPress={() => setReportingPostId(reportingPostId === post.id ? null : post.id)} style={styles.reportButton}>
                   <Ionicons name={reportedPostIds.includes(post.id) ? 'flag' : 'flag-outline'} size={19} color={reportedPostIds.includes(post.id) ? colors.mutedText : colors.danger} />
                 </Pressable> : null}
               </View>
@@ -541,7 +594,7 @@ export default function ForumScreen() {
               <View style={styles.reportPanel}>
                 <Text style={styles.reportTitle}>Por que deseja denunciar?</Text>
                 {reportReasons.map((reason) => (
-                  <Pressable key={reason} accessibilityRole="button" onPress={() => reportPost(post.id, reason)} style={styles.reportReason}>
+                  <Pressable key={reason} accessibilityRole="button" onPress={() => void reportPost(post.id, reason)} style={styles.reportReason}>
                     <Text style={styles.reportReasonText}>{reason}</Text>
                   </Pressable>
                 ))}
@@ -727,6 +780,30 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2
   },
+  notificationButton: {
+    alignItems: 'center',
+    backgroundColor: '#EAF4FF',
+    borderRadius: 22,
+    height: 42,
+    justifyContent: 'center',
+    position: 'relative',
+    width: 42,
+  },
+  notificationBadge: {
+    alignItems: 'center',
+    backgroundColor: colors.danger,
+    borderColor: colors.white,
+    borderRadius: 9,
+    borderWidth: 1,
+    height: 18,
+    justifyContent: 'center',
+    minWidth: 18,
+    paddingHorizontal: 3,
+    position: 'absolute',
+    right: -3,
+    top: -4,
+  },
+  notificationBadgeText: { color: colors.white, fontSize: 9, fontWeight: '800' },
 
   // Aparência do título principal.
   title: {
@@ -1092,3 +1169,4 @@ const styles = StyleSheet.create({
     width: 34
   },
 });
+

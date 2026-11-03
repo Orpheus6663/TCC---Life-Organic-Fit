@@ -165,7 +165,7 @@ export default function QuestionarioScreen() {
       }
       setIsFinished(true);
       await AsyncStorage.removeItem(ANSWERS_STORAGE_KEY);
-      router.replace('/tabs/home');
+      router.replace('/assinatura');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Não foi possível salvar suas respostas. Tente novamente.');
     } finally {

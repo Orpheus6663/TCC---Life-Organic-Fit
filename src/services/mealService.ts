@@ -1,4 +1,5 @@
-import { requireSupabase } from '../lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../lib/supabase';
 
 export const MEAL_TYPES = ['Café da manhã', 'Almoço', 'Janta', 'Lanches'] as const;
 export type MealType = (typeof MEAL_TYPES)[number];
@@ -22,8 +23,7 @@ function localDateString(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-// Catálogo temporário. Pode ser substituído por uma tabela/API nutricional quando
-// a fonte de dados for escolhida, sem mudar as telas que consomem getFoodCatalog.
+// Temporary catalog. Replace with the chosen nutrition API without changing meal storage.
 const FOOD_CATALOG: FoodOption[] = [
   { id: 'banana', name: 'Banana', serving: '1 unidade média', calories: 105 },
   { id: 'apple', name: 'Maçã', serving: '1 unidade média', calories: 95 },
@@ -41,40 +41,85 @@ export function getFoodCatalog() {
   return FOOD_CATALOG;
 }
 
-async function getCurrentUser() {
-  const client = requireSupabase();
-  const { data, error } = await client.auth.getUser();
-  if (error) throw new Error(error.message);
-  if (!data.user) throw new Error('Entre na sua conta para acessar suas refeições.');
-  return { client, userId: data.user.id };
+async function getStorageContext() {
+  const { data } = await supabase?.auth.getSession() ?? { data: { session: null } };
+  const userId = data.session?.user.id ?? null;
+  const ownerId = userId ?? 'guest';
+  return { key: `@lifeorganicfit/meals-v1/${ownerId}`, userId };
 }
 
-export async function getMeals(date = localDateString()) {
-  const { client, userId } = await getCurrentUser();
-  const { data, error } = await client
+async function readAllMeals() {
+  const { key, userId } = await getStorageContext();
+  const raw = await AsyncStorage.getItem(key);
+  let meals: Meal[] = [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    meals = Array.isArray(parsed) ? parsed as Meal[] : [];
+  } catch {
+    meals = [];
+  }
+  await importLegacyMealsOnce(key, userId, meals);
+  const updated = await AsyncStorage.getItem(key);
+  if (!updated) return meals;
+  try {
+    const parsed: unknown = JSON.parse(updated);
+    return Array.isArray(parsed) ? parsed as Meal[] : meals;
+  } catch {
+    return meals;
+  }
+}
+
+async function writeAllMeals(meals: Meal[]) {
+  const { key } = await getStorageContext();
+  await AsyncStorage.setItem(key, JSON.stringify(meals));
+}
+
+async function importLegacyMealsOnce(key: string, userId: string | null, currentMeals: Meal[]) {
+  if (!supabase || !userId) return;
+  const migrationKey = `${key}/legacy-imported`;
+  if (await AsyncStorage.getItem(migrationKey)) return;
+
+  // Copy any diary records from the old Supabase-backed version to local storage once.
+  const { data, error } = await supabase
     .from('meals')
     .select('id, name, detail, category, calories, logged_on, created_at')
     .eq('user_id', userId)
-    .eq('logged_on', date)
     .order('created_at', { ascending: true });
-  if (error) throw new Error(error.message);
-  return data as Meal[];
+  if (error) {
+    if (error.code === '42P01' || error.code === 'PGRST205') {
+      await AsyncStorage.setItem(migrationKey, 'done');
+    }
+    return;
+  }
+
+  const knownIds = new Set(currentMeals.map((meal) => meal.id));
+  const merged = [...currentMeals, ...((data ?? []) as Meal[]).filter((meal) => !knownIds.has(meal.id))];
+  await AsyncStorage.setItem(key, JSON.stringify(merged));
+  await AsyncStorage.setItem(migrationKey, 'done');
+}
+
+export async function getMeals(date = localDateString()) {
+  return (await readAllMeals()).filter((meal) => meal.logged_on === date);
 }
 
 export async function addFoodToMeal(food: FoodOption, category: MealType) {
-  const { client, userId } = await getCurrentUser();
-  const { data, error } = await client
-    .from('meals')
-    .insert({
-      user_id: userId,
-      name: food.name,
-      detail: food.serving,
-      category,
-      calories: food.calories,
-      logged_on: localDateString(),
-    })
-    .select('id, name, detail, category, calories, logged_on, created_at')
-    .single();
-  if (error) throw new Error(error.message);
-  return data as Meal;
+  const meals = await readAllMeals();
+  const meal: Meal = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: food.name,
+    detail: food.serving,
+    category,
+    calories: food.calories,
+    logged_on: localDateString(),
+    created_at: new Date().toISOString(),
+  };
+  await writeAllMeals([...meals, meal]);
+  return meal;
+}
+
+export async function removeMeal(mealId: string) {
+  const meals = await readAllMeals();
+  const nextMeals = meals.filter((meal) => meal.id !== mealId);
+  if (nextMeals.length === meals.length) throw new Error('Esse alimento não foi encontrado no diário local.');
+  await writeAllMeals(nextMeals);
 }

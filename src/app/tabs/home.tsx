@@ -1,16 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Animated, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ImageSourcePropType } from 'react-native';
-import { Card } from '../../components/Card';
 import { Header } from '../../components/Header';
 import { ThemeSurface } from '../../components/ThemeSurface';
 import { colors } from '../../constants/colors';
 import { isSupabaseConfigured, requireSupabase } from '../../lib/supabase';
 import { loadForumPosts } from '../../services/forumService';
 import type { ForumPost } from '../../services/forumService';
+import { getMeals } from '../../services/mealService';
+import { getQuestionnaireAnswersForCurrentUser } from '../../services/questionnaireService';
+import { estimateDailyCalorieTarget } from '../../services/calorieGoalService';
+import { getDemoProfilePhoto } from '../../services/demoPremiumService';
 
 // Recupera as publicações locais quando o fórum ainda não está conectado ao Supabase.
 const FORUM_STORAGE_KEY = '@lifeorganicfit/forum-posts-v1';
@@ -71,12 +74,45 @@ export default function HomeScreen() {
   const [bannerIndex, setBannerIndex] = useState(0);
   // Guarda o avatar selecionado no perfil para exibi-lo também na tela inicial.
   const [avatarId, setAvatarId] = useState<string | null>(null);
+  const [profilePhotoUri, setProfilePhotoUri] = useState<string | null>(null);
+  const [consumedCalories, setConsumedCalories] = useState(0);
+  const [targetCalories, setTargetCalories] = useState<number | null>(null);
   // Guarda a publicação que está no topo do ranking de curtidas.
   const [trendingPosts, setTrendingPosts] = useState<ForumPost[]>([]);
   // Compartilha a posição do scroll com o cabeçalho e a forma azul do fundo.
   const scrollY = useRef(new Animated.Value(0)).current;
   // Mantém uma frase diária que também se atualiza caso o app atravesse a meia-noite aberto.
   const [dailyPhrase, setDailyPhrase] = useState(() => getDailyPhrase());
+
+  useFocusEffect(useCallback(() => {
+    let isActive = true;
+    async function loadDailySummary() {
+      try {
+        const localPhoto = await getDemoProfilePhoto();
+        if (isActive) setProfilePhotoUri(localPhoto);
+        const meals = await getMeals();
+        if (!isActive) return;
+        setConsumedCalories(meals.reduce((total, meal) => total + meal.calories, 0));
+        if (isSupabaseConfigured) {
+          try {
+            const answers = await getQuestionnaireAnswersForCurrentUser();
+            if (isActive) setTargetCalories(estimateDailyCalorieTarget(answers));
+          } catch {
+            if (isActive) setTargetCalories(null);
+          }
+        } else if (isActive) {
+          setTargetCalories(null);
+        }
+      } catch {
+        if (isActive) {
+          setConsumedCalories(0);
+          setTargetCalories(null);
+        }
+      }
+    }
+    void loadDailySummary();
+    return () => { isActive = false; };
+  }, []));
 
   // Agenda a próxima troca para a meia-noite local, respeitando o fuso horário do aparelho.
   useEffect(() => {
@@ -145,6 +181,7 @@ export default function HomeScreen() {
   }, []);
   // A publicação exibida é sempre a que tem mais curtidas no ranking atual.
   const trendingPost = trendingPosts[0];
+  const calorieProgress = targetCalories ? Math.min(consumedCalories / targetCalories, 1) : 0;
   // Troca para a imagem anterior do carrossel; se estiver na primeira, volta para a última (efeito circular).
   function bannerAnterior() {
     setBannerIndex((atual) => (atual === 0 ? BANNERS.length - 1 : atual - 1));
@@ -180,7 +217,9 @@ export default function HomeScreen() {
         {/* Mantém a foto de perfil no topo do conteúdo da Home. */}
         <View style={styles.avatarWrapper}>
           <View style={styles.avatar}>
-            {avatarId && PROFILE_AVATARS[avatarId]
+            {profilePhotoUri
+              ? <Image source={{ uri: profilePhotoUri }} style={styles.avatarImage} />
+              : avatarId && PROFILE_AVATARS[avatarId]
               ? <Image source={PROFILE_AVATARS[avatarId]} style={styles.avatarImage} />
               : <Ionicons name="person" size={28} color={colors.white} />}
           </View>
@@ -211,25 +250,33 @@ export default function HomeScreen() {
           ) : null}
         </View>
 
-        {/* Linha com os dois cartões de resumo, lado a lado. */}
-        <View style={styles.cardsRow}>
-
-          {/* Primeiro cartão: mantém a meta do dia em porcentagem. */}
-          <Card>
-            <Text style={styles.cardTitle}>Meta do Dia</Text>
-            {/* Agrupa o ícone e a porcentagem da meta na mesma linha. */}
-            <View style={styles.cardInline}>
-              <Text style={styles.cardEmoji}>🎯</Text>
-              <Text style={styles.cardValue}>70%</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Ver calorias consumidas e refeições" onPress={() => router.push('/tabs/refeicoes')} style={styles.calorieSummary}>
+            <View style={styles.calorieTopRow}>
+              <View style={styles.calorieIconCircle}><Ionicons name="flame" size={42} color={colors.primary} /></View>
+              <View style={styles.calorieSummaryText}>
+                <Text style={styles.cardTitle}>Calorias de hoje</Text>
+                <Text accessibilityLabel={`${consumedCalories} quilocalorias consumidas de ${targetCalories ?? 'meta não disponível'} quilocalorias`} style={styles.calorieSummaryValue}>{consumedCalories.toLocaleString('pt-BR')} kcal</Text>
+              </View>
+              <View style={styles.calorieDivider} />
+              <View style={styles.calorieArrow}><Ionicons name="arrow-forward" size={22} color={colors.primary} /></View>
             </View>
-          </Card>
+            <View style={styles.calorieProgressTrack}>
+              <View style={[styles.calorieProgressFill, { width: `${calorieProgress * 100}%` }]} />
+            </View>
+            <Text style={styles.calorieSummaryHint}>
+              {targetCalories === null
+                ? 'Meta estimada indisponível. Confira seu questionário.'
+                : `Meta diária estimada: ${targetCalories.toLocaleString('pt-BR')} kcal`}
+            </Text>
+        </Pressable>
 
-          {/* Segundo cartão: mostra a frase que vale para o dia atual. */}
-          <Card>
-            <Text style={styles.cardTitle}>Frase do Dia</Text>
-            <Text style={styles.dailyPhrase}>“{dailyPhrase}”</Text>
-          </Card>
-
+        <View style={styles.phraseCard}>
+            <View style={styles.phraseIconCircle}><Ionicons name="calendar" size={40} color={colors.primary} /></View>
+            <View style={styles.phraseCopy}>
+              <Text style={styles.cardTitle}>Frase do Dia</Text>
+              <Text style={styles.dailyPhrase}>“{dailyPhrase}”</Text>
+            </View>
+            <Ionicons name="create" size={26} color={colors.primary} style={styles.phraseDecoration} />
         </View>
 
         {/* Mostra a publicação que está em primeiro lugar no ranking de curtidas. */}
@@ -338,47 +385,40 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700'
   },
-  // Alinha os dois cartões lado a lado, com espaço entre eles.
-  cardsRow: {
-    flexDirection: 'row',
-    gap: 14,
-
+  calorieSummary: {
+    backgroundColor: 'rgba(115, 216, 244, 0.20)',
+    borderRadius: 22,
+    gap: 10,
+    overflow: 'hidden',
+    paddingHorizontal: 16,
+    paddingVertical: 13
   },
+  calorieTopRow: { alignItems: 'center', flexDirection: 'row', gap: 12 },
+  calorieIconCircle: { alignItems: 'center', backgroundColor: colors.white, borderRadius: 29, height: 58, justifyContent: 'center', width: 58 },
+  calorieSummaryText: { flex: 1, gap: 2 },
+  calorieSummaryValue: { color: colors.primary, fontSize: 27, fontWeight: '900', letterSpacing: -0.7 },
+  calorieDivider: { backgroundColor: colors.mediumBlue, height: 58, width: 1.5 },
+  calorieArrow: { alignItems: 'center', backgroundColor: colors.white, borderRadius: 17, height: 34, justifyContent: 'center', width: 34 },
+  calorieProgressTrack: { backgroundColor: colors.white, borderColor: colors.mediumBlue, borderRadius: 6, borderWidth: 1, height: 10, overflow: 'hidden' },
+  calorieProgressFill: { backgroundColor: colors.primary, borderRadius: 7, height: '100%' },
+  calorieSummaryHint: { color: colors.primary, fontSize: 11, textAlign: 'center' },
+  phraseCard: { alignItems: 'center', backgroundColor: 'rgba(115, 216, 244, 0.20)', borderRadius: 22, flexDirection: 'row', gap: 12, minHeight: 90, overflow: 'hidden', paddingHorizontal: 16, paddingVertical: 13 },
+  phraseIconCircle: { alignItems: 'center', backgroundColor: colors.white, borderRadius: 29, height: 58, justifyContent: 'center', width: 58 },
+  phraseCopy: { flex: 1, gap: 5 },
+  phraseDecoration: { alignSelf: 'flex-start', marginTop: 2, transform: [{ rotate: '35deg' }] },
   // Título pequeno dentro de cada cartão ("Meta do Dia" / "Sequência").
   cardTitle: {
-    color: colors.text,
+    color: colors.primary,
     fontSize: 13.5,
     fontWeight: '700'
-  },
-  // Alinha o ícone e o valor da meta diária em uma linha.
-  cardInline: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6
-  },
-  // Tamanho do ícone usado ao lado da meta diária.
-  cardEmoji: {
-    fontSize: 22
-  },
-  // Destaque numérico da meta diária.
-  cardValue: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: '800'
   },
   // Mantém a frase diária legível dentro do cartão menor da Home.
   dailyPhrase: {
     alignSelf: 'stretch',
     color: colors.text,
     fontSize: 12,
-    lineHeight: 17,
-    textAlign: 'center'
-  },
-  // Estilo do texto descritivo no cartão de sequência.
-  cardText: {
-    color: colors.text,
-    fontSize: 12.5,
-    textAlign: 'center'
+    lineHeight: 18,
+    textAlign: 'left'
   },
   // Cartão de destaque que segue o estilo azul e arredondado do restante da Home.
   trendingCard: {

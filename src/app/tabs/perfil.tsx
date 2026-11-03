@@ -1,12 +1,15 @@
 ﻿import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
-import { router } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
 import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Button } from '../../components/Button';
 import { ThemeSurface } from '../../components/ThemeSurface';
 import { colors } from '../../constants/colors';
 import { isSupabaseConfigured, requireSupabase } from '../../lib/supabase';
 import { deleteAccount, signOut } from '../../services/authService';
+import { getDemoProfilePhoto, hasDemoPremium, saveDemoProfilePhoto } from '../../services/demoPremiumService';
 
 const avatars = [
   { id: 'vermelho', source: require('../../../assets/perfil/vermelho.png') },
@@ -18,6 +21,7 @@ const avatars = [
 ] as const;
 
 const profileOptions = [
+  { icon: 'sparkles-outline', label: 'Gerenciar assinatura', section: 'subscription' },
   { icon: 'settings-outline', label: 'Configurações do app', section: 'settings' },
   { icon: 'lock-closed-outline', label: 'Privacidade', section: 'privacy' },
   { icon: 'construct-outline', label: 'Gerenciar Conta', section: 'account' },
@@ -34,7 +38,9 @@ export default function PerfilScreen() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [avatarId, setAvatarId] = useState<string | null>(null);
+  const [profilePhotoUri, setProfilePhotoUri] = useState<string | null>(null);
   const [isAvatarPickerOpen, setIsAvatarPickerOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     let isActive = true;
@@ -53,6 +59,7 @@ export default function PerfilScreen() {
         setName(String(session?.user.user_metadata?.name ?? ''));
         setEmail(session?.user.email ?? '');
         setAvatarId(String(session?.user.user_metadata?.avatar_id ?? '') || null);
+        setIsAdmin(session?.user.app_metadata?.role === 'admin');
       });
       unsubscribe = () => authListener.subscription.unsubscribe();
       try {
@@ -62,6 +69,13 @@ export default function PerfilScreen() {
           setName(String(data.user?.user_metadata?.name ?? ''));
           setEmail(data.user?.email ?? '');
           setAvatarId(String(data.user?.user_metadata?.avatar_id ?? '') || null);
+          setIsAdmin(data.user?.app_metadata?.role === 'admin');
+        }
+        // Atualiza sempre: uma sessão emitida antes da promoção pode ainda não conter o role.
+        const { data: refreshed, error: refreshError } = await client.auth.refreshSession();
+        if (refreshError) throw refreshError;
+        if (isActive && refreshed.session?.user) {
+          setIsAdmin(refreshed.session.user.app_metadata?.role === 'admin');
         }
       } catch (reason) {
         if (isActive) setError(reason instanceof Error ? reason.message : 'Não foi possível carregar o perfil.');
@@ -99,6 +113,8 @@ export default function PerfilScreen() {
       const client = requireSupabase();
       const { data, error: updateError } = await client.auth.updateUser({ data: { avatar_id: id } });
       if (updateError) throw updateError;
+      await saveDemoProfilePhoto(null);
+      setProfilePhotoUri(null);
       setAvatarId(String(data.user.user_metadata?.avatar_id ?? id));
       setError('');
       setIsAvatarPickerOpen(false);
@@ -135,12 +151,50 @@ export default function PerfilScreen() {
 
   const selectedAvatar = avatars.find((avatar) => avatar.id === avatarId);
 
+  useFocusEffect(useCallback(() => {
+    let isActive = true;
+    getDemoProfilePhoto().then((uri) => { if (isActive) setProfilePhotoUri(uri); }).catch(() => {});
+    return () => { isActive = false; };
+  }, []));
+
+  async function chooseProfilePhoto() {
+    if (!await hasDemoPremium()) {
+      setIsAvatarPickerOpen(false);
+      Alert.alert('Recurso Premium', 'Ative o Premium para escolher uma foto de perfil da galeria.', [
+        { text: 'Agora não', style: 'cancel' },
+        { text: 'Ver Premium', onPress: () => router.push('/assinatura') },
+      ]);
+      return;
+    }
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permissão da galeria', 'Permita o acesso às fotos para escolher sua foto de perfil.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.85 });
+      const sourceUri = result.canceled ? null : result.assets[0]?.uri;
+      if (!sourceUri) return;
+      if (!FileSystem.documentDirectory) throw new Error('Armazenamento local indisponível.');
+      const extension = sourceUri.split('.').pop()?.split('?')[0] || 'jpg';
+      const savedUri = `${FileSystem.documentDirectory}profile-${Date.now()}.${extension}`;
+      await FileSystem.copyAsync({ from: sourceUri, to: savedUri });
+      await saveDemoProfilePhoto(savedUri);
+      setProfilePhotoUri(savedUri);
+      setAvatarId(null);
+      setError('');
+      setIsAvatarPickerOpen(false);
+    } catch (reason) {
+      Alert.alert('Não foi possível escolher a foto', reason instanceof Error ? reason.message : 'Tente novamente.');
+    }
+  }
+
   return (
     <ThemeSurface><View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.accountCard}>
           <Pressable accessibilityRole="button" accessibilityLabel="Escolher foto de perfil" onPress={() => setIsAvatarPickerOpen(true)} style={styles.avatar}>
-            {selectedAvatar ? <Image source={selectedAvatar.source} style={styles.avatarImage} /> : <Ionicons name="person" size={38} color="#FFFFFF" />}
+            {profilePhotoUri ? <Image source={{ uri: profilePhotoUri }} style={styles.avatarImage} /> : selectedAvatar ? <Image source={selectedAvatar.source} style={styles.avatarImage} /> : <Ionicons name="person" size={38} color="#FFFFFF" />}
             <View style={styles.editBadge}>
               <Ionicons name="pencil" size={12} color={colors.primary} />
             </View>
@@ -165,6 +219,13 @@ export default function PerfilScreen() {
             : <Button onPress={() => router.push('/auth/login')}>Entrar ou criar conta</Button>}
         </View>
 
+        {/* A entrada administrativa só aparece para uma sessão com papel confirmado pelo Supabase. */}
+        {isAdmin ? <Pressable accessibilityRole="button" onPress={() => router.push('/admin')} style={styles.adminButton}>
+          <Ionicons name="shield-checkmark-outline" size={20} color={colors.white} />
+          <Text style={styles.adminButtonText}>Painel de administração</Text>
+          <Ionicons name="chevron-forward" size={17} color={colors.white} />
+        </Pressable> : null}
+
         <View style={styles.optionsCard}>
           {profileOptions.map((option, index) => <Pressable
             key={option.label}
@@ -172,7 +233,9 @@ export default function PerfilScreen() {
             disabled={isSubmitting}
             onPress={() => option.section === 'delete'
               ? confirmDeleteAccount()
-              : router.push({ pathname: '/preferencias', params: { section: option.section } })}
+              : option.section === 'subscription'
+                ? router.push('/assinatura')
+                : router.push({ pathname: '/preferencias', params: { section: option.section } })}
             style={[styles.optionRow, index < profileOptions.length - 1 && styles.optionDivider]}
           >
             <Ionicons name={option.icon} size={21} color={option.section === 'delete' ? colors.danger : '#303030'} />
@@ -185,6 +248,10 @@ export default function PerfilScreen() {
         <View style={styles.modalBackdrop}>
           <View style={styles.avatarModal}>
             <Text style={styles.modalTitle}>Escolha sua foto</Text>
+            <Pressable accessibilityRole="button" onPress={() => void chooseProfilePhoto()} style={styles.galleryButton}>
+              <Ionicons name="images-outline" size={20} color={colors.primary} />
+              <Text style={styles.galleryButtonText}>Escolher da galeria · Premium</Text>
+            </Pressable>
             <View style={styles.avatarGrid}>
               {avatars.map((avatar) => (
                 <Pressable key={avatar.id} accessibilityRole="button" accessibilityLabel={`Selecionar avatar ${avatar.id}`} onPress={() => void selectAvatar(avatar.id)} style={[styles.avatarChoice, avatar.id === avatarId && styles.selectedAvatarChoice]}>
@@ -239,6 +306,8 @@ const styles = StyleSheet.create({
   modalBackdrop: { alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.45)', flex: 1, justifyContent: 'center', padding: 24 },
   avatarModal: { alignItems: 'center', backgroundColor: colors.white, borderRadius: 20, gap: 20, padding: 24, width: '100%' },
   modalTitle: { color: '#252525', fontSize: 18, fontWeight: '800' },
+  galleryButton: { alignItems: 'center', alignSelf: 'stretch', borderColor: colors.primary, borderRadius: 12, borderWidth: 1, flexDirection: 'row', gap: 9, justifyContent: 'center', padding: 12 },
+  galleryButtonText: { color: colors.primary, fontSize: 14, fontWeight: '700' },
   avatarGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, justifyContent: 'center' },
   avatarChoice: { borderColor: 'transparent', borderRadius: 38, borderWidth: 3, height: 72, overflow: 'hidden', width: 72 },
   selectedAvatarChoice: { borderColor: colors.primary },
@@ -306,6 +375,8 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     padding: 12
   },
+  adminButton: { alignItems: 'center', backgroundColor: colors.primary, borderRadius: 16, flexDirection: 'row', gap: 10, justifyContent: 'center', paddingHorizontal: 14, paddingVertical: 13 },
+  adminButtonText: { color: colors.white, flex: 1, fontSize: 14, fontWeight: '700' },
   error: {
     color: colors.danger,
     fontSize: 13,

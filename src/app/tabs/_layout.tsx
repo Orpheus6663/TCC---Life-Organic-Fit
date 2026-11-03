@@ -17,7 +17,7 @@ export default function TabsLayout() {
       {/* Abre o fórum de postagens anônimas no lugar da antiga aba Água. */}
       <Tabs.Screen name="forum" options={{ title: translateText('Fórum', language), tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles-outline" color={color} size={size} /> }} />
       <Tabs.Screen name="refeicoes" options={{ title: translateText('Refeições', language), tabBarIcon: ({ color, size }) => <Ionicons name="restaurant-outline" color={color} size={size} /> }} />
-      <Tabs.Screen name="progresso" options={{ title: translateText('Progresso', language), tabBarIcon: ({ color, size }) => <Ionicons name="stats-chart-outline" color={color} size={size} /> }} />
+      <Tabs.Screen name="progresso" options={{ href: null }} />
       {/* Aba da assistente de IA, posicionada antes da aba Perfil. */}
       <Tabs.Screen name="ia" options={{ title: translateText('IA', language), tabBarIcon: ({ color, size }) => <Ionicons name="sparkles-outline" color={color} size={size} /> }} />
       <Tabs.Screen name="perfil" options={{ title: translateText('Perfil', language), tabBarIcon: ({ color, size }) => <Ionicons name="person-outline" color={color} size={size} /> }} />

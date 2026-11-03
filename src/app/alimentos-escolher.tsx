@@ -2,9 +2,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { colors } from '../constants/colors';
 import { ThemeSurface } from '../components/ThemeSurface';
 import { addFoodToMeal, getFoodCatalog, MEAL_TYPES, type MealType } from '../services/mealService';
+import { hasDemoPremium } from '../services/demoPremiumService';
 
 function asMealType(value: string | string[] | undefined): MealType {
   const candidate = Array.isArray(value) ? value[0] : value;
@@ -32,8 +34,27 @@ export default function AlimentosEscolherScreen() {
     }
   }
 
-  function showPaidPhotoNotice() {
-    Alert.alert('Identificar alimento pela foto', 'A identificação por imagem vai usar uma API paga e ainda não está conectada.');
+  async function showPaidPhotoNotice() {
+    if (!await hasDemoPremium()) {
+      Alert.alert('Recurso Premium', 'Ative o Premium para tirar uma foto do prato.', [
+        { text: 'Agora não', style: 'cancel' },
+        { text: 'Ver Premium', onPress: () => router.push('/assinatura') },
+      ]);
+      return;
+    }
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permissão da câmera', 'Permita o acesso à câmera para fotografar seu prato.');
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.8 });
+      if (!result.canceled && result.assets[0]?.uri) {
+        Alert.alert('Foto capturada', 'A análise automática do prato ainda não está conectada. A foto não foi enviada nem analisada.');
+      }
+    } catch {
+      Alert.alert('Não foi possível abrir a câmera', 'Confira as permissões e tente novamente.');
+    }
   }
 
   return (
@@ -67,7 +88,7 @@ export default function AlimentosEscolherScreen() {
         {foods.length === 0 ? <Text style={styles.empty}>Nenhum alimento encontrado.</Text> : null}
         <Pressable accessibilityRole="button" onPress={showPaidPhotoNotice} style={styles.paidFeature}>
           <Ionicons name="camera-outline" size={20} color={colors.primary} />
-          <Text style={styles.paidFeatureText}>Reconhecer pela foto · recurso pago</Text>
+          <Text style={styles.paidFeatureText}>Reconhecer pela foto · Premium</Text>
         </Pressable>
       </ScrollView>
     </View></ThemeSurface>

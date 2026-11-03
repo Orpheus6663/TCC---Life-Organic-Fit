@@ -28,6 +28,15 @@ type ForumReplyRow = {
 
 type LikeRow = { id_postagem: string; id_usuario: string };
 
+// Representa uma denúncia persistida para análise pela conta administradora.
+export type ForumReport = {
+  id: string;
+  postId: string;
+  reporterId: string | null;
+  reason: string;
+  createdAt: string;
+};
+
 export type ForumComment = {
   id: string;
   text: string;
@@ -176,7 +185,48 @@ export async function createForumPost(input: { text: string; userId: string; aut
 }
 
 export async function deleteForumPost(postId: string) {
-  const { error } = await requireSupabase().from('postagens_forum').delete().eq('id', postId);
+  const { data, error } = await requireSupabase().from('postagens_forum').delete().eq('id', postId).select('id');
+  if (error) throw new Error(error.message);
+  if (!data?.length) throw new Error('O Supabase não autorizou a exclusão desta publicação. Confira o papel admin e as políticas em database/schema.sql.');
+}
+
+// Envia uma denúncia identificada ao Supabase para análise dos administradores.
+export async function reportForumPost(postId: string, reporterId: string, reason: string) {
+  const { error } = await requireSupabase().from('denuncias_forum').insert({
+    id_postagem: postId,
+    id_denunciante: reporterId,
+    motivo: reason,
+  });
+  if (error) throw new Error(error.message);
+}
+
+// Carrega as denúncias pendentes; o banco só entrega resultados para administradores.
+export async function loadForumReports(): Promise<ForumReport[]> {
+  const { data, error } = await requireSupabase()
+    .from('denuncias_forum')
+    .select('id, id_postagem, id_denunciante, motivo, criada_em')
+    .order('criada_em', { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    postId: row.id_postagem,
+    reporterId: row.id_denunciante,
+    reason: row.motivo,
+    createdAt: row.criada_em,
+  }));
+}
+
+export async function loadForumReportCount(): Promise<number> {
+  const { count, error } = await requireSupabase()
+    .from('denuncias_forum')
+    .select('id', { count: 'exact', head: true });
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
+// Remove uma denúncia depois da análise administrativa.
+export async function dismissForumReport(reportId: string) {
+  const { error } = await requireSupabase().from('denuncias_forum').delete().eq('id', reportId);
   if (error) throw new Error(error.message);
 }
 

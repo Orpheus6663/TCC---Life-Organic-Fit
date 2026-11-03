@@ -13,11 +13,14 @@ export default function RootLayout() {
           <Stack.Screen name="index" />
           <Stack.Screen name="auth/login" />
           <Stack.Screen name="auth/cadastro" />
+          <Stack.Screen name="auth/recuperar-senha" />
+          <Stack.Screen name="auth/alterar-senha" />
           <Stack.Screen name="auth/questionario" />
           <Stack.Screen name="tabs" />
           <Stack.Screen name="configuracoes" />
           <Stack.Screen name="preferencias" />
           <Stack.Screen name="alimentos-escolher" />
+          <Stack.Screen name="admin" />
         </Stack>
       </ThemeProvider>
     </LanguageProvider>
