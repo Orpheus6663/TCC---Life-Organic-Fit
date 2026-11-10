@@ -5,6 +5,7 @@ import { Animated, Image, Pressable, StyleSheet, Text, View } from 'react-native
 import { Ionicons } from '@expo/vector-icons';
 import type { ImageSourcePropType } from 'react-native';
 import { Header } from '../../components/Header';
+import { NotificationBell } from '../../components/NotificationBell';
 import { ThemeSurface } from '../../components/ThemeSurface';
 import { colors } from '../../constants/colors';
 import { isSupabaseConfigured, requireSupabase } from '../../lib/supabase';
@@ -74,6 +75,7 @@ export default function HomeScreen() {
   const [bannerIndex, setBannerIndex] = useState(0);
   // Guarda o avatar selecionado no perfil para exibi-lo também na tela inicial.
   const [avatarId, setAvatarId] = useState<string | null>(null);
+  const [profileName, setProfileName] = useState('');
   const [profilePhotoUri, setProfilePhotoUri] = useState<string | null>(null);
   const [consumedCalories, setConsumedCalories] = useState(0);
   const [targetCalories, setTargetCalories] = useState<number | null>(null);
@@ -128,10 +130,16 @@ export default function HomeScreen() {
     let isActive = true;
     const client = requireSupabase();
     const { data: authListener } = client.auth.onAuthStateChange((_event, session) => {
-      if (isActive) setAvatarId(String(session?.user.user_metadata?.avatar_id ?? '') || null);
+      if (isActive) {
+        setAvatarId(String(session?.user.user_metadata?.avatar_id ?? '') || null);
+        setProfileName(String(session?.user.user_metadata?.name ?? ''));
+      }
     });
     void client.auth.getUser().then(({ data, error }) => {
-      if (isActive && !error) setAvatarId(String(data.user?.user_metadata?.avatar_id ?? '') || null);
+      if (isActive && !error) {
+        setAvatarId(String(data.user?.user_metadata?.avatar_id ?? '') || null);
+        setProfileName(String(data.user?.user_metadata?.name ?? ''));
+      }
     });
     return () => {
       isActive = false;
@@ -216,13 +224,17 @@ export default function HomeScreen() {
 
         {/* Mantém a foto de perfil no topo do conteúdo da Home. */}
         <View style={styles.avatarWrapper}>
-          <View style={styles.avatar}>
-            {profilePhotoUri
-              ? <Image source={{ uri: profilePhotoUri }} style={styles.avatarImage} />
-              : avatarId && PROFILE_AVATARS[avatarId]
-              ? <Image source={PROFILE_AVATARS[avatarId]} style={styles.avatarImage} />
-              : <Ionicons name="person" size={28} color={colors.white} />}
+          <View style={styles.profileIdentity}>
+            <View style={styles.avatar}>
+              {profilePhotoUri
+                ? <Image source={{ uri: profilePhotoUri }} style={styles.avatarImage} />
+                : avatarId && PROFILE_AVATARS[avatarId]
+                ? <Image source={PROFILE_AVATARS[avatarId]} style={styles.avatarImage} />
+                : <Ionicons name="person" size={28} color={colors.white} />}
+            </View>
+            <Text numberOfLines={1} style={styles.profileName}>{profileName || 'Olá!'}</Text>
           </View>
+          <NotificationBell inline />
         </View>
 
         {/* Cartão do carrossel: uma imagem grande com setas para trocar de foto. */}
@@ -328,9 +340,13 @@ const styles = StyleSheet.create({
   },
   // Alinha o círculo do avatar à esquerda da tela.
   avatarWrapper: {
-    alignItems: 'flex-start',
-    marginHorizontal: 20
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%'
   },
+  profileIdentity: { alignItems: 'center', flex: 1, flexDirection: 'row', gap: 10, maxWidth: '100%' },
+  profileName: { color: colors.primaryDark, flexShrink: 1, fontSize: 16, fontWeight: '700' },
   // Círculo que recorta a foto de perfil e mantém o ícone alinhado no estado vazio.
   avatar: {
     alignItems: 'center',
@@ -344,6 +360,7 @@ const styles = StyleSheet.create({
   // Preenche o círculo com a imagem do avatar selecionado no perfil.
   avatarImage: {
     height: '100%',
+    resizeMode: 'cover',
     width: '100%'
   },
   // Container do carrossel: cantos arredondados e "overflow: hidden" corta a imagem nas bordas.
@@ -386,10 +403,11 @@ const styles = StyleSheet.create({
     fontWeight: '700'
   },
   calorieSummary: {
-    backgroundColor: 'rgba(115, 216, 244, 0.20)',
+    backgroundColor: 'rgba(115, 216, 244, 0.28)',
+    borderColor: '#B8E8F5',
     borderRadius: 22,
+    borderWidth: 1,
     gap: 10,
-    overflow: 'hidden',
     paddingHorizontal: 16,
     paddingVertical: 13
   },
@@ -402,7 +420,7 @@ const styles = StyleSheet.create({
   calorieProgressTrack: { backgroundColor: colors.white, borderColor: colors.mediumBlue, borderRadius: 6, borderWidth: 1, height: 10, overflow: 'hidden' },
   calorieProgressFill: { backgroundColor: colors.primary, borderRadius: 7, height: '100%' },
   calorieSummaryHint: { color: colors.primary, fontSize: 11, textAlign: 'center' },
-  phraseCard: { alignItems: 'center', backgroundColor: 'rgba(115, 216, 244, 0.20)', borderRadius: 22, flexDirection: 'row', gap: 12, minHeight: 90, overflow: 'hidden', paddingHorizontal: 16, paddingVertical: 13 },
+  phraseCard: { alignItems: 'center', backgroundColor: 'rgba(115, 216, 244, 0.28)', borderColor: '#B8E8F5', borderRadius: 22, borderWidth: 1, flexDirection: 'row', gap: 12, minHeight: 90, paddingHorizontal: 16, paddingVertical: 13 },
   phraseIconCircle: { alignItems: 'center', backgroundColor: colors.white, borderRadius: 29, height: 58, justifyContent: 'center', width: 58 },
   phraseCopy: { flex: 1, gap: 5 },
   phraseDecoration: { alignSelf: 'flex-start', marginTop: 2, transform: [{ rotate: '35deg' }] },
@@ -422,7 +440,7 @@ const styles = StyleSheet.create({
   },
   // Cartão de destaque que segue o estilo azul e arredondado do restante da Home.
   trendingCard: {
-    backgroundColor: '#F0F7FF',
+    backgroundColor: colors.white,
     borderColor: '#D4E7FA',
     borderRadius: 18,
     borderWidth: 1,
@@ -456,7 +474,7 @@ const styles = StyleSheet.create({
   // Forma azul arredondada no rodapé: um retângulo alto com os cantos superiores bem arredondados,
   // criando o efeito de "curva"/"onda" quando posicionado abaixo da borda visível da tela.
   wave: {
-    backgroundColor: '#1800B8',
+    backgroundColor: colors.primaryDark,
     borderTopLeftRadius: 300,
     borderTopRightRadius: 300,
     bottom: -40,

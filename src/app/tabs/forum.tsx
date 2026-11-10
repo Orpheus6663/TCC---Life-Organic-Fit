@@ -1,16 +1,18 @@
 ﻿import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import type { User } from '@supabase/supabase-js';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Image, ImageSourcePropType, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors } from '../../constants/colors';
+import { NotificationBell } from '../../components/NotificationBell';
 import { ThemeSurface } from '../../components/ThemeSurface';
 import { isSupabaseConfigured, requireSupabase } from '../../lib/supabase';
 import { createForumComment, createForumPost, deleteForumComment, deleteForumPost, loadForumPosts, loadForumReportCount, reportForumPost, toggleForumLike, uploadForumImage } from '../../services/forumService';
 import { removeAdminPost } from '../../services/adminService';
+import { getDemoProfilePhoto } from '../../services/demoPremiumService';
 
 // Chave fixa usada para salvar e recuperar os posts neste dispositivo.
 const STORAGE_KEY = '@lifeorganicfit/forum-posts-v1';
@@ -89,6 +91,7 @@ export default function ForumScreen() {
   const [posts, setPosts] = useState<ForumPost[]>([]);
   const [userName, setUserName] = useState('Pessoa usuária');
   const [avatarId, setAvatarId] = useState<string | undefined>();
+  const [profilePhotoUri, setProfilePhotoUri] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [pendingReportCount, setPendingReportCount] = useState(0);
@@ -127,6 +130,16 @@ export default function ForumScreen() {
     const matchesCategory = selectedCategory === 'Todos' || post.category?.toLowerCase() === selectedCategory.toLowerCase().replace(/s$/, '') || (selectedCategory === 'Receitas' && post.category === 'Receita');
     return matchesSearch && matchesCategory;
   });
+
+  useFocusEffect(useCallback(() => {
+    let isActive = true;
+    getDemoProfilePhoto().then((uri) => {
+      if (isActive) setProfilePhotoUri(uri);
+    }).catch(() => {
+      if (isActive) setProfilePhotoUri(null);
+    });
+    return () => { isActive = false; };
+  }, []));
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -454,7 +467,7 @@ export default function ForumScreen() {
           {/* Formulário rolável para caber em telas menores e com o teclado aberto. */}
           <ScrollView contentContainerStyle={styles.composerPage} keyboardShouldPersistTaps="handled">
             <View style={styles.anonymousRow}>
-              <View style={styles.avatar}>{avatarId && avatarSources[avatarId] ? <Image source={avatarSources[avatarId]} style={styles.avatarImage} /> : <Ionicons name="person" size={18} color={colors.primary} />}</View>
+              <View style={styles.avatar}>{profilePhotoUri ? <Image source={{ uri: profilePhotoUri }} style={styles.avatarImage} /> : avatarId && avatarSources[avatarId] ? <Image source={avatarSources[avatarId]} style={styles.avatarImage} /> : <Ionicons name="person" size={18} color={colors.primary} />}</View>
               <Text style={styles.anonymousLabel}>{userName}</Text>
             </View>
             <Text style={styles.formPrompt}>O que você gostaria de compartilhar?</Text>
@@ -486,6 +499,7 @@ export default function ForumScreen() {
           <Text style={styles.title}>Fórum da comunidade</Text>
           <Text style={styles.subtitle}>Converse e compartilhe com a comunidade</Text>
         </View>
+        <NotificationBell inline />
         {isAdmin ? <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Denúncias pendentes: ${pendingReportCount}`}
@@ -564,7 +578,7 @@ export default function ForumScreen() {
             {/* Cabeçalho anônimo, data e botão para abrir as opções de denúncia. */}
             <View style={styles.postHeader}>
               <View style={styles.anonymousRow}>
-                <View style={styles.avatar}>{post.avatarId && avatarSources[post.avatarId] ? <Image source={avatarSources[post.avatarId]} style={styles.avatarImage} /> : <Ionicons name="person" size={17} color={colors.primary} />}</View>
+                <View style={styles.avatar}>{post.authorId === (userId ?? 'local-device') && profilePhotoUri ? <Image source={{ uri: profilePhotoUri }} style={styles.avatarImage} /> : post.avatarId && avatarSources[post.avatarId] ? <Image source={avatarSources[post.avatarId]} style={styles.avatarImage} /> : <Ionicons name="person" size={17} color={colors.primary} />}</View>
                 <View>
                   <Text style={styles.anonymousLabel}>{post.authorName || 'Anônimo'}</Text>
                   <Text style={styles.postDate}>{new Date(post.createdAt).toLocaleString('pt-BR')}</Text>
@@ -761,7 +775,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 11,
     paddingHorizontal: 16,
-    paddingTop: 53,
+    paddingTop: 18,
     paddingBottom: 13
   },
 

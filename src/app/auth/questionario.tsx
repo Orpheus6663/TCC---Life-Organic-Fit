@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import { colors } from '../../constants/colors';
@@ -67,6 +68,7 @@ export default function QuestionarioScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [needsEmailConfirmation, setNeedsEmailConfirmation] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
+  const [currentSection, setCurrentSection] = useState(0);
 
   useEffect(() => {
     let isActive = true;
@@ -116,6 +118,38 @@ export default function QuestionarioScreen() {
         ? selected.filter((item) => item !== option)
         : [...selected.filter((item) => item !== 'Nenhuma'), option];
     answer(question, next);
+  }
+
+  function moveToNextSection() {
+    const section = sections[currentSection];
+    const firstMissing = section.questions.find((question) => {
+      if (question.optional) return false;
+      const value = answers[question.id];
+      return Array.isArray(value) ? value.length === 0 : !String(value ?? '').trim();
+    });
+    if (firstMissing) {
+      setError(`Responda: “${firstMissing.title}”`);
+      return;
+    }
+    if (currentSection === 0) {
+      const age = Number(answers.age);
+      const height = Number(answers.height_cm);
+      const weight = Number(answers.weight_kg);
+      if (!Number.isInteger(age) || age < 13 || age > 120) return setError('Informe uma idade válida (de 13 a 120 anos).');
+      if (!Number.isFinite(height) || height < 80 || height > 250) return setError('Informe uma altura válida em centímetros.');
+      if (!Number.isFinite(weight) || weight < 20 || weight > 500) return setError('Informe um peso válido em quilos.');
+    }
+    setError('');
+    setCurrentSection((current) => Math.min(current + 1, sections.length - 1));
+  }
+
+  function moveToPreviousSection() {
+    if (currentSection === 0) {
+      router.back();
+      return;
+    }
+    setError('');
+    setCurrentSection((current) => Math.max(current - 1, 0));
   }
 
   async function submit() {
@@ -173,15 +207,26 @@ export default function QuestionarioScreen() {
     }
   }
 
-  let number = 0;
+  let number = sections.slice(0, currentSection).reduce((total, section) => total + section.questions.length, 0);
   return (
     <ThemeSurface><KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        <Text style={styles.heading}>Questionário inicial</Text>
-        <Text style={styles.intro}>Leva menos de 5 minutos.</Text>
+        <View style={styles.panel}>
+        <View style={styles.hero}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Voltar" onPress={moveToPreviousSection} style={styles.backButton}>
+            <Ionicons color={colors.primary} name="chevron-back" size={30} />
+          </Pressable>
+          <View style={styles.heroIcon}><Ionicons color={colors.primary} name="clipboard-outline" size={32} /></View>
+          <Text style={styles.heading}>Questionário inicial</Text>
+          <Text style={styles.intro}>Conte um pouco sobre você para personalizarmos sua experiência!</Text>
+        </View>
         <Text style={styles.autosave}>Suas respostas são salvas automaticamente neste aparelho.</Text>
         <Text style={styles.privacy}>Suas respostas ajudam a personalizar sua experiência. As perguntas de saúde são opcionais.</Text>
 
+          <View accessibilityRole="progressbar" accessibilityValue={{ min: 1, max: sections.length, now: currentSection + 1 }} style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${((currentSection + 1) / sections.length) * 100}%` }]} />
+          </View>
+          <Text style={styles.progressLabel}>{currentSection + 1} de {sections.length}</Text>
         {registration && !registration.password ? (
           <View style={styles.question}>
             <Text style={styles.questionTitle}>Digite sua senha novamente para concluir o cadastro.</Text>
@@ -189,7 +234,7 @@ export default function QuestionarioScreen() {
           </View>
         ) : null}
 
-        {sections.map((section) => (
+        {sections.slice(currentSection, currentSection + 1).map((section) => (
           <View key={section.title} style={styles.section}>
             <Text style={styles.sectionTitle}>{section.title}</Text>
             {section.questions.map((question) => {
@@ -207,7 +252,7 @@ export default function QuestionarioScreen() {
                       onChangeText={(value) => answer(question, value)}
                       placeholder={question.placeholder}
                       value={typeof selected === 'string' ? selected : ''}
-                      style={question.kind === 'text' ? styles.textarea : undefined}
+                      style={[styles.field, question.kind === 'text' && styles.textarea]}
                     />
                   ) : (
                     <View style={styles.options}>
@@ -244,9 +289,10 @@ export default function QuestionarioScreen() {
             <Text style={styles.loginLink}>Já confirmou o e-mail? Entrar</Text>
           </Pressable>
         ) : null}
-        <Button disabled={!isDraftRestored || isSaving || needsEmailConfirmation} onPress={submit}>
-          {isSaving ? 'Salvando respostas...' : needsEmailConfirmation ? 'Cadastro concluído' : 'Concluir questionário'}
+        <Button disabled={!isDraftRestored || isSaving || needsEmailConfirmation} onPress={currentSection === sections.length - 1 ? submit : moveToNextSection}>
+          {isSaving ? 'Salvando respostas...' : needsEmailConfirmation ? 'Cadastro concluído' : currentSection === sections.length - 1 ? 'Concluir questionário' : 'Próximo'}
         </Button>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView></ThemeSurface>
   );
@@ -255,58 +301,75 @@ export default function QuestionarioScreen() {
 const styles = StyleSheet.create({
   // Define os estilos visuais do elemento "screen".
   screen: {
-    backgroundColor: colors.white,
+    backgroundColor: '#EEF6FF',
     flex: 1
   },
   // Define os estilos visuais do elemento "content".
   content: {
-    gap: 18,
+    gap: 16,
     paddingBottom: 40,
-    paddingHorizontal: 24,
-    paddingTop: 24
+    paddingHorizontal: 18,
+    paddingTop: 18
   },
+  panel: { backgroundColor: colors.white, borderColor: '#DCEBFF', borderRadius: 30, borderWidth: 1, elevation: 4, gap: 18, padding: 20, shadowColor: '#174A8B', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.08, shadowRadius: 18 },
+  hero: { alignItems: 'center', gap: 10, paddingHorizontal: 8, paddingTop: 4 },
+  backButton: { alignSelf: 'flex-start', alignItems: 'center', height: 40, justifyContent: 'center', width: 40 },
+  progressTrack: { alignSelf: 'stretch', backgroundColor: '#E3EEFC', borderRadius: 8, height: 10, overflow: 'hidden', marginTop: 4 },
+  progressFill: { backgroundColor: colors.primary, borderRadius: 8, height: '100%' },
+  progressLabel: { color: '#101B58', fontSize: 14, fontWeight: '700' },
+  heroIcon: { alignItems: 'center', backgroundColor: '#E6F1FF', borderRadius: 28, height: 56, justifyContent: 'center', width: 56 },
   // Define os estilos visuais do elemento "heading".
   heading: {
-    color: '#101828',
-    fontSize: 24,
+    color: '#101B58',
+    fontSize: 27,
     fontWeight: '800',
-    marginTop: 8
+    textAlign: 'center'
   },
   // Define os estilos visuais do elemento "intro".
   intro: {
-    color: colors.mutedText,
-    fontSize: 15,
-    marginTop: -12
+    color: '#587BAF',
+    fontSize: 16,
+    lineHeight: 23,
+    textAlign: 'center'
   },
   autosave: {
-    color: colors.primary,
+    color: '#587BAF',
     fontSize: 13
   },
   // Define os estilos visuais do elemento "privacy".
   privacy: {
-    color: colors.mutedText,
+    color: '#587BAF',
     fontSize: 13,
     lineHeight: 19
   },
   // Define os estilos visuais do elemento "section".
   section: {
-    gap: 20,
-    marginTop: 8
+    backgroundColor: '#F5F9FF',
+    borderColor: '#E1EEFF',
+    borderRadius: 23,
+    borderWidth: 1,
+    gap: 14,
+    padding: 16
   },
   // Define os estilos visuais do elemento "sectionTitle".
   sectionTitle: {
     color: colors.primary,
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '800',
     marginBottom: 2
   },
   // Define os estilos visuais do elemento "question".
   question: {
-    gap: 9
+    backgroundColor: colors.white,
+    borderColor: '#E1EEFF',
+    borderRadius: 18,
+    borderWidth: 1,
+    gap: 10,
+    padding: 14
   },
   // Define os estilos visuais do elemento "questionTitle".
   questionTitle: {
-    color: '#101828',
+    color: '#101B58',
     fontSize: 15,
     fontWeight: '700',
     lineHeight: 22
@@ -319,27 +382,30 @@ const styles = StyleSheet.create({
   },
   // Define os estilos visuais do elemento "option".
   option: {
-    backgroundColor: '#F8FAFC',
-    borderColor: '#D0D5DD',
-    borderRadius: 24,
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    borderColor: '#D8E8FF',
+    borderRadius: 16,
     borderWidth: 1,
+    minHeight: 46,
     paddingHorizontal: 14,
-    paddingVertical: 9
+    paddingVertical: 11
   },
   // Define os estilos visuais do elemento "optionSelected".
   optionSelected: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary
+    backgroundColor: '#EAF3FF',
+    borderColor: colors.primary,
+    borderWidth: 2
   },
   // Define os estilos visuais do elemento "optionText".
   optionText: {
-    color: '#101828',
+    color: '#101B58',
     fontSize: 14,
     fontWeight: '500'
   },
   // Define os estilos visuais do elemento "optionTextSelected".
   optionTextSelected: {
-    color: colors.white,
+    color: colors.primary,
     fontWeight: '700'
   },
   // Define os estilos visuais do elemento "textarea".
@@ -348,6 +414,7 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     textAlignVertical: 'top'
   },
+  field: { backgroundColor: colors.white, borderColor: '#D8E8FF', borderRadius: 16, borderWidth: 1, minHeight: 54 },
   // Define os estilos visuais do elemento "disclaimer".
   disclaimer: {
     color: colors.mutedText,
