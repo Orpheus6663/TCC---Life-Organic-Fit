@@ -1,12 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors } from '../../constants/colors';
 import { ThemeSurface } from '../../components/ThemeSurface';
 import { sendMessageToAI } from '../../services/aiService';
 import type { AiMessage } from '../../services/aiService';
 import { getQuestionnairePreferencesForAI } from '../../services/questionnaireService';
 import { useAppLanguage } from '../../i18n/language';
+import { deleteChatConversation, loadChatHistory, saveChatConversation, type ChatConversation } from '../../services/chatHistoryService';
 
 // Cada mensagem tem um identificador para a lista e um papel para definir o lado do balão.
 type ChatMessage = AiMessage & { id: number };
@@ -26,8 +27,40 @@ export default function IaScreen() {
   const [message, setMessage] = useState('');
   // Guarda o histórico visível no chat.
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [history, setHistory] = useState<ChatConversation[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const conversationRef = useRef<ScrollView>(null);
   // Indica que a chamada ao servidor está em andamento.
   const [isSending, setIsSending] = useState(false);
+
+  useEffect(() => {
+    let isActive = true;
+    loadChatHistory().then((saved) => {
+      if (!isActive) return;
+      setHistory(saved);
+      if (saved[0]) {
+        setConversationId(saved[0].id);
+        setMessages(saved[0].messages);
+      }
+    }).catch(() => {});
+    return () => { isActive = false; };
+  }, []);
+
+  async function persistConversation(id: string, nextMessages: ChatMessage[]) {
+    const firstQuestion = nextMessages.find((item) => item.role === 'user')?.content ?? 'Nova conversa';
+    try {
+      const updated = await saveChatConversation({
+        id,
+        title: firstQuestion.length > 52 ? `${firstQuestion.slice(0, 49)}...` : firstQuestion,
+        updatedAt: new Date().toISOString(),
+        messages: nextMessages,
+      });
+      setHistory(updated);
+    } catch {
+      // A conversa continua disponÃ­vel na tela mesmo quando o aparelho nÃ£o consegue salvÃ¡-la.
+    }
+  }
 
   // Envia uma pergunta digitada ou um dos exemplos e mostra a resposta recebida do servidor.
   async function sendMessage(text = message) {
@@ -36,22 +69,56 @@ export default function IaScreen() {
 
     const userMessage: ChatMessage = { id: Date.now(), role: 'user', content: question };
     const conversation = [...messages, userMessage];
+    const activeConversationId = conversationId ?? String(Date.now());
+    setConversationId(activeConversationId);
     setMessages(conversation);
     setMessage('');
     setIsSending(true);
+    await persistConversation(activeConversationId, conversation);
 
+    let replyText: string;
     try {
       const preferences = await getQuestionnairePreferencesForAI();
-      const reply = await sendMessageToAI(conversation.map(({ role, content }) => ({ role, content })), preferences, language);
-      setMessages((current) => [...current, { id: Date.now(), role: 'assistant', content: reply }]);
+      replyText = await sendMessageToAI(conversation.map(({ role, content }) => ({ role, content })), preferences, language);
     } catch (error) {
-      const errorText = error instanceof Error ? error.message : 'Não foi possível obter uma resposta da IA.';
-      setMessages((current) => [...current, { id: Date.now(), role: 'assistant', content: errorText }]);
-    } finally {
-      setIsSending(false);
+      replyText = error instanceof Error ? error.message : 'Não foi possível obter uma resposta da IA.';
     }
+    const completedConversation = [...conversation, { id: Date.now(), role: 'assistant' as const, content: replyText }];
+    setMessages(completedConversation);
+    await persistConversation(activeConversationId, completedConversation);
+    setIsSending(false);
   }
 
+  function resumeConversation(conversation: ChatConversation) {
+    setConversationId(conversation.id);
+    setMessages(conversation.messages);
+    setIsHistoryOpen(false);
+  }
+
+  function resetActiveConversation() {
+    setConversationId(null);
+    setMessages([]);
+    setIsHistoryOpen(false);
+  }
+
+  async function startNewConversation() {
+    if (conversationId && messages.length > 0) {
+      await persistConversation(conversationId, messages);
+    }
+    resetActiveConversation();
+  }
+
+  function confirmDeleteConversation(conversation: ChatConversation) {
+    Alert.alert('Excluir conversa?', 'Esta conversa será removida do histórico deste aparelho.', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Excluir', style: 'destructive', onPress: () => {
+        void deleteChatConversation(conversation.id).then((updated) => {
+          setHistory(updated);
+          if (conversationId === conversation.id) resetActiveConversation();
+        }).catch(() => Alert.alert('Histórico', 'Não foi possível excluir esta conversa.'));
+      } },
+    ]);
+  }
   return (
     // Ajusta a tela quando o teclado aparece, principalmente no iOS.
     <ThemeSurface><KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -60,14 +127,57 @@ export default function IaScreen() {
         <View style={styles.sparkle}>
           <Image source={require('../../../assets/logoIA.png')} style={styles.logo} resizeMode="cover" />
         </View>
-        <View style={styles.titleCopy}>
+                <View style={styles.titleCopy}>
           <Text style={styles.title}>NutriIA</Text>
-          <Text style={styles.subtitle}>Bem-estar, alimentação e movimento</Text>
+          <Text style={styles.subtitle}>{'Bem-estar, alimenta\u00e7\u00e3o e movimento'}</Text>
         </View>
       </View>
 
+      <Pressable accessibilityRole="button" disabled={isSending} onPress={() => setIsHistoryOpen(true)} style={styles.historyAccess}>
+        <View style={styles.historyAccessIcon}><Ionicons name="time-outline" size={20} color={colors.primary} /></View>
+        <View style={styles.historyAccessCopy}>
+          <Text style={styles.historyAccessTitle}>Histórico de conversas</Text>
+          <Text style={styles.historyAccessSubtitle}>Veja ou retome uma conversa anterior</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={19} color={colors.primary} />
+      </Pressable>
+
+      <Modal animationType="slide" onRequestClose={() => setIsHistoryOpen(false)} transparent visible={isHistoryOpen}>
+        <View style={styles.historyBackdrop}>
+          <View style={styles.historyPanel}>
+            <View style={styles.historyHeading}>
+              <Text style={styles.historyTitle}>{'Hist\u00f3rico da NutriIA'}</Text>
+              <Pressable accessibilityRole="button" accessibilityLabel={'Fechar hist\u00f3rico'} onPress={() => setIsHistoryOpen(false)} style={styles.historyClose}>
+                <Ionicons name="close" size={23} color={colors.mutedText} />
+              </Pressable>
+            </View>
+            <Pressable accessibilityRole="button" disabled={isSending} onPress={startNewConversation} style={styles.newConversation}>
+              <Ionicons name="add-circle-outline" size={20} color={colors.primary} />
+              <Text style={styles.newConversationText}>Nova conversa</Text>
+            </Pressable>
+            {history.length ? (
+              <ScrollView style={styles.historyList} showsVerticalScrollIndicator={false}>
+                {history.map((conversation) => (
+                  <View key={conversation.id} style={styles.historyRow}>
+                    <Pressable accessibilityRole="button" disabled={isSending} onPress={() => resumeConversation(conversation)} style={styles.historyItem}>
+                      <Text numberOfLines={1} style={styles.historyItemTitle}>{conversation.title}</Text>
+                      <Text style={styles.historyDate}>{new Date(conversation.updatedAt).toLocaleString('pt-BR')}</Text>
+                    </Pressable>
+                    <Pressable accessibilityRole="button" accessibilityLabel={`Excluir conversa ${conversation.title}`} disabled={isSending} onPress={() => confirmDeleteConversation(conversation)} style={styles.deleteConversation}>
+                      <Ionicons name="trash-outline" size={19} color={colors.danger} />
+                    </Pressable>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
+              <Text style={styles.emptyHistory}>{'Suas conversas salvas aparecer\u00e3o aqui.'}</Text>
+            )}
+          </View>
+        </View>
+      </Modal>
+
       {/* Área rolável que contém a apresentação inicial ou as mensagens enviadas e recebidas. */}
-      <ScrollView contentContainerStyle={styles.conversation} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <ScrollView ref={conversationRef} contentContainerStyle={styles.conversation} keyboardShouldPersistTaps="handled" onContentSizeChange={() => conversationRef.current?.scrollToEnd({ animated: false })} showsVerticalScrollIndicator={false}>
         {messages.length === 0 ? (
           // Antes da primeira pergunta, apresenta o chat e os atalhos de conversa.
           <View style={styles.welcome}>
@@ -166,6 +276,25 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 3
   },
+  historyAccess: { alignItems: 'center', backgroundColor: colors.white, borderBottomColor: '#E4E7EC', borderBottomWidth: 1, flexDirection: 'row', gap: 11, paddingHorizontal: 18, paddingVertical: 11 },
+  historyAccessIcon: { alignItems: 'center', backgroundColor: '#EAF4FF', borderRadius: 19, height: 38, justifyContent: 'center', width: 38 },
+  historyAccessCopy: { flex: 1, gap: 2 },
+  historyAccessTitle: { color: colors.primaryDark, fontSize: 13, fontWeight: '800' },
+  historyAccessSubtitle: { color: colors.mutedText, fontSize: 11 },
+  historyBackdrop: { alignItems: 'center', backgroundColor: 'rgba(17,24,39,0.42)', flex: 1, justifyContent: 'center', padding: 22 },
+  historyPanel: { backgroundColor: colors.white, borderColor: '#D8E8FF', borderRadius: 22, borderWidth: 1, maxHeight: '78%', maxWidth: 460, padding: 18, width: '100%' },
+  historyHeading: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+  historyTitle: { color: colors.primaryDark, fontSize: 19, fontWeight: '800' },
+  historyClose: { alignItems: 'center', height: 36, justifyContent: 'center', width: 36 },
+  newConversation: { alignItems: 'center', backgroundColor: '#EAF4FF', borderRadius: 12, flexDirection: 'row', gap: 9, marginBottom: 10, paddingHorizontal: 12, paddingVertical: 11 },
+  newConversationText: { color: colors.primary, fontSize: 14, fontWeight: '700' },
+  historyList: { flexGrow: 0 },
+  historyRow: { alignItems: 'center', borderTopColor: '#EAEEF5', borderTopWidth: 1, flexDirection: 'row' },
+  historyItem: { flex: 1, gap: 4, paddingVertical: 13 },
+  historyItemTitle: { color: colors.text, fontSize: 14, fontWeight: '700' },
+  historyDate: { color: colors.mutedText, fontSize: 11 },
+  deleteConversation: { alignItems: 'center', height: 42, justifyContent: 'center', width: 42 },
+  emptyHistory: { color: colors.mutedText, fontSize: 13, lineHeight: 19, paddingVertical: 22, textAlign: 'center' },
   // Título principal da assistente.
   title: {
     color: colors.white,

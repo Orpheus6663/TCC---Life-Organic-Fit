@@ -635,7 +635,7 @@ export default function ForumScreen() {
                   // Comentário principal com botão para iniciar uma resposta.
                   <View key={comment.id} style={styles.commentBlock}>
                     <View style={styles.commentRow}>
-                      <View style={styles.smallAvatar}>{comment.avatarId && avatarSources[comment.avatarId] ? <Image source={avatarSources[comment.avatarId]} style={styles.smallAvatarImage} /> : <Ionicons name="person" size={12} color={colors.primary} />}</View>
+                      <View style={styles.smallAvatar}>{comment.authorId === (userId ?? 'local-device') && profilePhotoUri ? <Image source={{ uri: profilePhotoUri }} style={styles.smallAvatarImage} /> : comment.avatarId && avatarSources[comment.avatarId] ? <Image source={avatarSources[comment.avatarId]} style={styles.smallAvatarImage} /> : <Ionicons name="person" size={12} color={colors.primary} />}</View>
                       <View style={styles.commentContent}>
                         <Text style={styles.commentAuthor}>{comment.authorName || 'Anônimo'}</Text>
                         <Text style={styles.commentText}>{comment.text}</Text>
@@ -648,7 +648,7 @@ export default function ForumScreen() {
                     {comment.replies.map((reply) => (
                       // Respostas ficam visualmente recuadas em relação ao comentário original.
                       <View key={reply.id} style={styles.replyRow}>
-                        <View style={styles.smallAvatar}>{reply.avatarId && avatarSources[reply.avatarId] ? <Image source={avatarSources[reply.avatarId]} style={styles.smallAvatarImage} /> : <Ionicons name="person" size={12} color={colors.primary} />}</View>
+                        <View style={styles.smallAvatar}>{reply.authorId === (userId ?? 'local-device') && profilePhotoUri ? <Image source={{ uri: profilePhotoUri }} style={styles.smallAvatarImage} /> : reply.avatarId && avatarSources[reply.avatarId] ? <Image source={avatarSources[reply.avatarId]} style={styles.smallAvatarImage} /> : <Ionicons name="person" size={12} color={colors.primary} />}</View>
                         <View style={styles.commentContent}>
                           <Text style={styles.commentAuthor}>{reply.authorName || 'Anônimo'} · resposta</Text>
                           <Text style={styles.commentText}>{reply.text}</Text>

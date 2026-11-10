@@ -100,11 +100,6 @@ export default function LoginScreen() {
           {formError ? <Text accessibilityLiveRegion="polite" style={styles.formError}>{formError}</Text> : null}
           <Button disabled={isSubmitting} onPress={submitSignIn}>{isSubmitting ? 'Entrando...' : 'Entrar'}</Button>
 
-          {/* Permite navegar pelas telas antes de configurar a conta e o Supabase. */}
-          <Pressable accessibilityRole="button" onPress={() => router.replace('/tabs/home')} style={styles.demoButton}>
-            <Text style={styles.demoText}>Continuar sem conta</Text>
-          </Pressable>
-          
         </View>
       </ScrollView>
     </KeyboardAvoidingView></ThemeSurface>
@@ -189,18 +184,6 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontSize: 13,
     textAlign: 'center'
-  },
-  // Define os estilos visuais do elemento "demoButton".
-  demoButton: {
-    alignItems: 'center',
-    paddingVertical: 10
-  },
-  // Define os estilos visuais do elemento "demoText".
-  demoText: {
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '700',
-    textDecorationLine: 'underline'
   },
   // Define os estilos visuais do elemento "fields".
   fields: {

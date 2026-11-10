@@ -124,6 +124,13 @@ export default function HomeScreen() {
     return () => clearTimeout(phraseTimer);
   }, [dailyPhrase]);
 
+  useEffect(() => {
+    const carouselTimer = setInterval(() => {
+      setBannerIndex((current) => (current === BANNERS.length - 1 ? 0 : current + 1));
+    }, 5000);
+    return () => clearInterval(carouselTimer);
+  }, []);
+
   // Sincroniza a foto da Home com o avatar salvo nos dados da conta do Supabase.
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -403,13 +410,18 @@ const styles = StyleSheet.create({
     fontWeight: '700'
   },
   calorieSummary: {
-    backgroundColor: 'rgba(115, 216, 244, 0.28)',
-    borderColor: '#B8E8F5',
+    backgroundColor: colors.white,
+    borderColor: '#E4E7EC',
     borderRadius: 22,
     borderWidth: 1,
+    elevation: 4,
     gap: 10,
     paddingHorizontal: 16,
-    paddingVertical: 13
+    paddingVertical: 13,
+    shadowColor: '#111827',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6
   },
   calorieTopRow: { alignItems: 'center', flexDirection: 'row', gap: 12 },
   calorieIconCircle: { alignItems: 'center', backgroundColor: colors.white, borderRadius: 29, height: 58, justifyContent: 'center', width: 58 },
@@ -420,7 +432,7 @@ const styles = StyleSheet.create({
   calorieProgressTrack: { backgroundColor: colors.white, borderColor: colors.mediumBlue, borderRadius: 6, borderWidth: 1, height: 10, overflow: 'hidden' },
   calorieProgressFill: { backgroundColor: colors.primary, borderRadius: 7, height: '100%' },
   calorieSummaryHint: { color: colors.primary, fontSize: 11, textAlign: 'center' },
-  phraseCard: { alignItems: 'center', backgroundColor: 'rgba(115, 216, 244, 0.28)', borderColor: '#B8E8F5', borderRadius: 22, borderWidth: 1, flexDirection: 'row', gap: 12, minHeight: 90, paddingHorizontal: 16, paddingVertical: 13 },
+  phraseCard: { alignItems: 'center', backgroundColor: colors.white, borderColor: '#E4E7EC', borderRadius: 22, borderWidth: 1, elevation: 4, flexDirection: 'row', gap: 12, minHeight: 90, paddingHorizontal: 16, paddingVertical: 13, shadowColor: '#111827', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 6 },
   phraseIconCircle: { alignItems: 'center', backgroundColor: colors.white, borderRadius: 29, height: 58, justifyContent: 'center', width: 58 },
   phraseCopy: { flex: 1, gap: 5 },
   phraseDecoration: { alignSelf: 'flex-start', marginTop: 2, transform: [{ rotate: '35deg' }] },
@@ -441,11 +453,16 @@ const styles = StyleSheet.create({
   // Cartão de destaque que segue o estilo azul e arredondado do restante da Home.
   trendingCard: {
     backgroundColor: colors.white,
-    borderColor: '#D4E7FA',
+    borderColor: '#E4E7EC',
     borderRadius: 18,
     borderWidth: 1,
+    elevation: 4,
     gap: 10,
-    padding: 15
+    padding: 15,
+    shadowColor: '#111827',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6
   },
   // Cabeçalho do destaque com chamada e indicação do ranking.
   trendingHeading: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
@@ -474,7 +491,7 @@ const styles = StyleSheet.create({
   // Forma azul arredondada no rodapé: um retângulo alto com os cantos superiores bem arredondados,
   // criando o efeito de "curva"/"onda" quando posicionado abaixo da borda visível da tela.
   wave: {
-    backgroundColor: colors.primaryDark,
+    backgroundColor: colors.primary,
     borderTopLeftRadius: 300,
     borderTopRightRadius: 300,
     bottom: -40,
