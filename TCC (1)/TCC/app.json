@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "NutriIA",
+    "slug": "nutria-chat",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": { "backgroundColor": "#0919bd" },
+    "android": { "package": "com.nutria.chat" },
+    "ios": { "bundleIdentifier": "com.nutria.chat" }
+  }
+}

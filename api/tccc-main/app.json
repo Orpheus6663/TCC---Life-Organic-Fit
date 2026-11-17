@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "lifeOrganicFit",
+    "slug": "lifeOrganicFit",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/lifeOrganicFit.png",
+    "scheme": "lifeorganicfit",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "icon": "./assets/lifeOrganicFit.png"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/lifeOrganicFit.png",
+        "backgroundImage": "./assets/lifeOrganicFit.png",
+        "monochromeImage": "./assets/lifeOrganicFit.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/lifeOrganicFit.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#208AEF",
+          "image": "./assets/lifeOrganicFit.png",
+          "imageWidth": 76
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
