@@ -242,7 +242,7 @@ export default function QuestionarioScreen() {
               const selected = answers[question.id];
               return (
                 <View key={question.id} style={styles.question}>
-                  <Text style={styles.questionTitle}>{number}. {question.title}{question.optional ? ' (opcional)' : ''}</Text>
+                  <Text style={styles.questionTitle}>{number}. {question.title}{question.optional ? <Text style={styles.optionalLabel}> * opcional</Text> : null}</Text>
                   {question.kind === 'number' || question.kind === 'text' ? (
                     <Input
                       accessibilityLabel={question.title}
@@ -373,6 +373,10 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     lineHeight: 22
+  },
+  optionalLabel: {
+    color: '#E53935',
+    fontWeight: '800'
   },
   // Define os estilos visuais do elemento "options".
   options: {

@@ -10,6 +10,7 @@ import { colors } from '../../constants/colors';
 import { isSupabaseConfigured, requireSupabase } from '../../lib/supabase';
 import { deleteAccount, signOut } from '../../services/authService';
 import { getDemoProfilePhoto, hasDemoPremium, saveDemoProfilePhoto } from '../../services/demoPremiumService';
+import { uploadForumImage } from '../../services/forumService';
 
 const avatars = [
   { id: 'vermelho', source: require('../../../assets/perfil/vermelho.png') },
@@ -59,6 +60,7 @@ export default function PerfilScreen() {
         setName(String(session?.user.user_metadata?.name ?? ''));
         setEmail(session?.user.email ?? '');
         setAvatarId(String(session?.user.user_metadata?.avatar_id ?? '') || null);
+        setProfilePhotoUri(typeof session?.user.user_metadata?.avatar_url === 'string' ? session.user.user_metadata.avatar_url : null);
         setIsAdmin(session?.user.app_metadata?.role === 'admin');
       });
       unsubscribe = () => authListener.subscription.unsubscribe();
@@ -69,6 +71,7 @@ export default function PerfilScreen() {
           setName(String(data.user?.user_metadata?.name ?? ''));
           setEmail(data.user?.email ?? '');
           setAvatarId(String(data.user?.user_metadata?.avatar_id ?? '') || null);
+          setProfilePhotoUri(typeof data.user?.user_metadata?.avatar_url === 'string' ? data.user.user_metadata.avatar_url : null);
           setIsAdmin(data.user?.app_metadata?.role === 'admin');
         }
         // Atualiza sempre: uma sessão emitida antes da promoção pode ainda não conter o role.
@@ -111,8 +114,13 @@ export default function PerfilScreen() {
     }
     try {
       const client = requireSupabase();
-      const { data, error: updateError } = await client.auth.updateUser({ data: { avatar_id: id } });
+      const { data: current, error: currentError } = await client.auth.getUser();
+      if (currentError) throw currentError;
+      if (!current.user) throw new Error('Entre na sua conta para alterar a foto.');
+      const { data, error: updateError } = await client.auth.updateUser({ data: { ...current.user.user_metadata, avatar_id: id, avatar_url: null } });
       if (updateError) throw updateError;
+      const { error: photoError } = await client.from('forum_profile_photos').upsert({ user_id: data.user.id, photo_url: null });
+      if (photoError) throw new Error(`Rode database/profile-photos.sql no SQL Editor do Supabase. Detalhes: ${photoError.message}`);
       await saveDemoProfilePhoto(null);
       setProfilePhotoUri(null);
       setAvatarId(String(data.user.user_metadata?.avatar_id ?? id));
@@ -153,7 +161,7 @@ export default function PerfilScreen() {
 
   useFocusEffect(useCallback(() => {
     let isActive = true;
-    getDemoProfilePhoto().then((uri) => { if (isActive) setProfilePhotoUri(uri); }).catch(() => {});
+    getDemoProfilePhoto().then((uri) => { if (isActive && uri) setProfilePhotoUri(uri); }).catch(() => {});
     return () => { isActive = false; };
   }, []));
 
@@ -179,6 +187,16 @@ export default function PerfilScreen() {
       const extension = sourceUri.split('.').pop()?.split('?')[0] || 'jpg';
       const savedUri = `${FileSystem.documentDirectory}profile-${Date.now()}.${extension}`;
       await FileSystem.copyAsync({ from: sourceUri, to: savedUri });
+      if (!isSupabaseConfigured) throw new Error('Conecte o Supabase para compartilhar a foto com outras pessoas.');
+      const client = requireSupabase();
+      const { data: current, error: currentError } = await client.auth.getUser();
+      if (currentError) throw currentError;
+      if (!current.user) throw new Error('Entre na sua conta para compartilhar a foto.');
+      const photoUrl = await uploadForumImage(savedUri, current.user.id);
+      const { error: photoError } = await client.from('forum_profile_photos').upsert({ user_id: current.user.id, photo_url: photoUrl });
+      if (photoError) throw new Error(`Rode database/profile-photos.sql no SQL Editor do Supabase. Detalhes: ${photoError.message}`);
+      const { error: updateError } = await client.auth.updateUser({ data: { ...current.user.user_metadata, avatar_id: null, avatar_url: photoUrl } });
+      if (updateError) throw updateError;
       await saveDemoProfilePhoto(savedUri);
       setProfilePhotoUri(savedUri);
       setAvatarId(null);

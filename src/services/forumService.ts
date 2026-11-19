@@ -43,6 +43,7 @@ export type ForumComment = {
   authorId: string;
   authorName: string;
   avatarId?: string;
+  avatarUrl?: string;
   createdAt: string;
   replies: ForumComment[];
 };
@@ -53,6 +54,7 @@ export type ForumPost = {
   authorId: string;
   authorName: string;
   avatarId?: string;
+  avatarUrl?: string;
   category: string;
   // Endereço público da foto e permissão carregados junto com cada publicação.
   imageUri?: string;
@@ -81,6 +83,23 @@ export async function loadForumPosts(): Promise<ForumPost[]> {
     .order('criado_em', { ascending: true });
 
   if (repliesError) throw new Error(repliesError.message);
+  const authorIds = [...new Set([
+    ...posts.map((post) => post.id_usuario),
+    ...((replyRows ?? []) as ForumReplyRow[]).map((reply) => reply.id_usuario),
+  ])];
+  const photoByUserId = new Map<string, string>();
+  if (authorIds.length > 0) {
+    const { data: photos, error: photosError } = await client
+      .from('forum_profile_photos')
+      .select('user_id, photo_url')
+      .in('user_id', authorIds);
+    // A tabela de fotos é opcional; sua ausência não pode bloquear as postagens.
+    if (!photosError) {
+      for (const photo of photos ?? []) {
+        if (typeof photo.photo_url === 'string' && photo.photo_url) photoByUserId.set(photo.user_id, photo.photo_url);
+      }
+    }
+  }
   const { data: likeRows, error: likesError } = await client
     .from('curtidas_forum')
     .select('id_postagem, id_usuario')
@@ -102,6 +121,7 @@ export async function loadForumPosts(): Promise<ForumPost[]> {
       authorId: row.id_usuario,
       authorName: row.autor_nome ?? 'Pessoa usuária',
       avatarId: row.autor_avatar ?? undefined,
+      avatarUrl: photoByUserId.get(row.id_usuario),
       createdAt: row.criado_em,
       replies: [],
     };
@@ -122,6 +142,7 @@ export async function loadForumPosts(): Promise<ForumPost[]> {
     authorId: post.id_usuario,
     authorName: post.nome_autor ?? 'Pessoa usuária',
     avatarId: post.avatar_id ?? undefined,
+    avatarUrl: photoByUserId.get(post.id_usuario),
     category: post.categoria ?? 'Dicas',
     imageUri: post.imagem_url ?? undefined,
     // Usa true para preservar o comportamento de posts criados antes desta opção.

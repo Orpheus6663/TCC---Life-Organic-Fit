@@ -91,7 +91,7 @@ export default function HomeScreen() {
     async function loadDailySummary() {
       try {
         const localPhoto = await getDemoProfilePhoto();
-        if (isActive) setProfilePhotoUri(localPhoto);
+        if (isActive && localPhoto) setProfilePhotoUri(localPhoto);
         const meals = await getMeals();
         if (!isActive) return;
         setConsumedCalories(meals.reduce((total, meal) => total + meal.calories, 0));
@@ -139,12 +139,14 @@ export default function HomeScreen() {
     const { data: authListener } = client.auth.onAuthStateChange((_event, session) => {
       if (isActive) {
         setAvatarId(String(session?.user.user_metadata?.avatar_id ?? '') || null);
+        setProfilePhotoUri(typeof session?.user.user_metadata?.avatar_url === 'string' ? session.user.user_metadata.avatar_url : null);
         setProfileName(String(session?.user.user_metadata?.name ?? ''));
       }
     });
     void client.auth.getUser().then(({ data, error }) => {
       if (isActive && !error) {
         setAvatarId(String(data.user?.user_metadata?.avatar_id ?? '') || null);
+        setProfilePhotoUri(typeof data.user?.user_metadata?.avatar_url === 'string' ? data.user.user_metadata.avatar_url : null);
         setProfileName(String(data.user?.user_metadata?.name ?? ''));
       }
     });
@@ -231,7 +233,7 @@ export default function HomeScreen() {
 
         {/* Mantém a foto de perfil no topo do conteúdo da Home. */}
         <View style={styles.avatarWrapper}>
-          <View style={styles.profileIdentity}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Abrir meu perfil" onPress={() => router.push('/tabs/perfil')} style={styles.profileIdentity}>
             <View style={styles.avatar}>
               {profilePhotoUri
                 ? <Image source={{ uri: profilePhotoUri }} style={styles.avatarImage} />
@@ -240,7 +242,7 @@ export default function HomeScreen() {
                 : <Ionicons name="person" size={28} color={colors.white} />}
             </View>
             <Text numberOfLines={1} style={styles.profileName}>{profileName || 'Olá!'}</Text>
-          </View>
+          </Pressable>
           <NotificationBell inline />
         </View>
 

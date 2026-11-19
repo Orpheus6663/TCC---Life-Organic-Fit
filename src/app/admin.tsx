@@ -164,7 +164,7 @@ export default function AdminScreen() {
           </View>) : null}
           {section === 'reports' && reports.length === 0 && !isLoading ? <Text style={styles.empty}>Nenhuma denúncia pendente.</Text> : null}
           {section === 'posts' && posts.length === 0 && !isLoading ? <Text style={styles.empty}>Nenhuma publicação encontrada.</Text> : null}
-          {section === 'accounts' && accounts.length === 0 && !isLoading ? <Text style={styles.empty}>Nenhuma conta encontrada.</Text> : null}
+          {section === 'accounts' && accounts.length === 0 && !isLoading && !error ? <Text style={styles.empty}>Nenhuma conta encontrada.</Text> : null}
           {section === 'accounts' && hasMoreAccounts ? <Pressable accessibilityRole="button" onPress={() => void refresh('accounts', Math.floor(accounts.length / 100) + 1)} style={styles.secondaryButton}><Text style={styles.secondaryButtonText}>Carregar mais contas</Text></Pressable> : null}
         </ScrollView>
       </> : null}

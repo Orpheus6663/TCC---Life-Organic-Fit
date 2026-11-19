@@ -10,6 +10,7 @@ const ink = colors.primaryDark;
 const pale = '#EAF8FC';
 
 const benefits = [
+  { icon: 'megaphone-outline' as const, text: 'Use o LOF sem anúncios' },
   { icon: 'person-circle-outline' as const, text: 'Escolha uma foto da galeria para o seu perfil' },
   { icon: 'camera-outline' as const, text: 'Em breve: estime as calorias do prato pela foto' },
   { icon: 'chatbox-ellipses-outline' as const, text: 'Experiência ainda mais completa na comunidade' },

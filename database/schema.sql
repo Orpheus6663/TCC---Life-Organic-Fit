@@ -151,9 +151,17 @@ create table if not exists public.curtidas_forum (
   primary key (id_postagem, id_usuario)
 );
 
+-- Guarda a foto atual do perfil para mostrá-la em publicações e comentários antigos e novos.
+create table if not exists public.forum_profile_photos (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  photo_url text,
+  updated_at timestamptz not null default now()
+);
+
 alter table public.postagens_forum enable row level security;
 alter table public.respostas_forum enable row level security;
 alter table public.curtidas_forum enable row level security;
+alter table public.forum_profile_photos enable row level security;
 
 -- Cria o bucket público para exibir fotos do fórum no feed de toda a comunidade.
 insert into storage.buckets (id, name, public)
@@ -172,6 +180,24 @@ create policy "Forum users upload own images"
 grant select, insert, delete on public.postagens_forum to authenticated;
 grant select, insert, delete on public.respostas_forum to authenticated;
 grant select, insert, delete on public.curtidas_forum to authenticated;
+revoke all on public.forum_profile_photos from public, anon, authenticated;
+grant select, insert, update on public.forum_profile_photos to authenticated;
+
+drop policy if exists "Forum members read profile photos" on public.forum_profile_photos;
+create policy "Forum members read profile photos"
+  on public.forum_profile_photos for select to authenticated
+  using (true);
+
+drop policy if exists "Users add own forum profile photo" on public.forum_profile_photos;
+create policy "Users add own forum profile photo"
+  on public.forum_profile_photos for insert to authenticated
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Users update own forum profile photo" on public.forum_profile_photos;
+create policy "Users update own forum profile photo"
+  on public.forum_profile_photos for update to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
 
 drop policy if exists "Forum users read posts" on public.postagens_forum;
 create policy "Forum users read posts"

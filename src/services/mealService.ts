@@ -23,24 +23,6 @@ function localDateString(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-// Temporary catalog. Replace with the chosen nutrition API without changing meal storage.
-const FOOD_CATALOG: FoodOption[] = [
-  { id: 'banana', name: 'Banana', serving: '1 unidade média', calories: 105 },
-  { id: 'apple', name: 'Maçã', serving: '1 unidade média', calories: 95 },
-  { id: 'egg', name: 'Ovo cozido', serving: '1 unidade', calories: 78 },
-  { id: 'bread', name: 'Pão integral', serving: '2 fatias', calories: 138 },
-  { id: 'rice', name: 'Arroz cozido', serving: '100 g', calories: 130 },
-  { id: 'beans', name: 'Feijão cozido', serving: '100 g', calories: 76 },
-  { id: 'chicken', name: 'Peito de frango grelhado', serving: '100 g', calories: 165 },
-  { id: 'salad', name: 'Salada de folhas', serving: '1 prato', calories: 35 },
-  { id: 'yogurt', name: 'Iogurte natural', serving: '1 pote (170 g)', calories: 100 },
-  { id: 'oats', name: 'Aveia', serving: '30 g', calories: 117 },
-];
-
-export function getFoodCatalog() {
-  return FOOD_CATALOG;
-}
-
 async function getStorageContext() {
   const { data } = await supabase?.auth.getSession() ?? { data: { session: null } };
   const userId = data.session?.user.id ?? null;

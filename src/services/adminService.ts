@@ -12,13 +12,28 @@ export type AdminAccount = {
 
 // Pede ao endpoint protegido do servidor a lista paginada de contas.
 export async function loadAdminAccounts(page = 1) {
-  const { data, error } = await requireSupabase().functions.invoke('admin-management', { body: { action: 'listUsers', page } });
+  const { data, error } = await requireSupabase().rpc('admin_list_users', { page_number: page });
   if (error) {
     const details = error.message || 'erro sem detalhes';
-    throw new Error(`Não foi possível listar as contas (${details}). A função admin-management precisa estar implantada no projeto Supabase conectado pelo .env.`);
+    throw new Error(`Não foi possível listar as contas (${details}). Rode database/admin-list-accounts.sql no SQL Editor do projeto Supabase conectado pelo .env.`);
   }
-  if (data?.error) throw new Error(data.error);
-  return { users: (data?.users ?? []) as AdminAccount[], hasMore: Boolean(data?.hasMore) };
+  const rows = (data ?? []) as Array<{
+    id: string;
+    email: string | null;
+    created_at: string;
+    last_sign_in_at: string | null;
+    is_admin: boolean;
+  }>;
+  return {
+    users: rows.map((user) => ({
+      id: user.id,
+      email: user.email ?? '',
+      createdAt: user.created_at,
+      lastSignInAt: user.last_sign_in_at,
+      isAdmin: user.is_admin,
+    } satisfies AdminAccount)),
+    hasMore: rows.length === 100,
+  };
 }
 
 // Remove uma conta comum; o servidor impede a remoção de contas administradoras.

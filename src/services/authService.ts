@@ -6,10 +6,21 @@ export function getPasswordValidationMessage(password: string): string | null {
   return null;
 }
 
-export async function sendPasswordRecovery(email: string) {
+function resolveAuthEmail(identity: string) {
+  const normalizedIdentity = identity.trim();
+  if (normalizedIdentity.toUpperCase() !== 'ADM_LOF437') return normalizedIdentity.toLowerCase();
+
+  const adminLoginEmail = process.env.EXPO_PUBLIC_ADMIN_LOGIN_EMAIL?.trim().toLowerCase();
+  if (!adminLoginEmail) {
+    throw new Error('Configure EXPO_PUBLIC_ADMIN_LOGIN_EMAIL no arquivo .env para acessar ou recuperar a conta administrativa.');
+  }
+  return adminLoginEmail;
+}
+
+export async function sendPasswordRecovery(identity: string) {
   const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.replace(/\/+$/, '');
   if (!supabaseUrl) throw new Error('Configure EXPO_PUBLIC_SUPABASE_URL no arquivo .env.');
-  const { error } = await requireSupabase().auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+  const { error } = await requireSupabase().auth.resetPasswordForEmail(resolveAuthEmail(identity), {
     redirectTo: `${supabaseUrl}/functions/v1/password-reset`,
   });
   if (error) throw new Error(error.message);
@@ -23,16 +34,8 @@ import type { QuestionnaireAnswers } from './questionnaireService';
 
 export async function signIn(email: string, password: string) {
   // Converte o identificador público do admin no e-mail interno configurado para autenticação.
-  const normalizedIdentity = email.trim();
-  const adminLoginEmail = process.env.EXPO_PUBLIC_ADMIN_LOGIN_EMAIL?.trim().toLowerCase();
-  const authEmail = normalizedIdentity.toUpperCase() === 'ADM_LOF437'
-    ? adminLoginEmail
-    : normalizedIdentity.toLowerCase();
-  if (!authEmail) {
-    throw new Error('Configure EXPO_PUBLIC_ADMIN_LOGIN_EMAIL no arquivo .env para habilitar o acesso ADM_LOF437.');
-  }
   const { data, error } = await requireSupabase().auth.signInWithPassword({
-    email: authEmail,
+    email: resolveAuthEmail(email),
     password,
   });
   if (error) {

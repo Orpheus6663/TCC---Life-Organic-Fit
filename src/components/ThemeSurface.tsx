@@ -57,7 +57,7 @@ function darkSurfaceColor(color: unknown, isRoot: boolean) {
   return color;
 }
 
-function transformStyle(style: unknown, isRoot: boolean, isText: boolean) {
+function transformStyle(style: unknown, isRoot: boolean, isText: boolean, isTextInput = false) {
   const flattened = StyleSheet.flatten(style as never);
   if (!flattened || typeof flattened !== 'object') return style;
   const updated: Record<string, unknown> = { ...flattened };
@@ -65,7 +65,9 @@ function transformStyle(style: unknown, isRoot: boolean, isText: boolean) {
   if (updated.borderColor) updated.borderColor = darkSurfaceColor(updated.borderColor, false);
   if (updated.borderBottomColor) updated.borderBottomColor = darkSurfaceColor(updated.borderBottomColor, false);
   if (updated.borderTopColor) updated.borderTopColor = darkSurfaceColor(updated.borderTopColor, false);
-  updated.color = updated.color ? darkTextColor(updated.color) : isText ? '#F2F5F8' : undefined;
+  if (isTextInput) updated.color = '#FFFFFF';
+  else if (updated.color) updated.color = darkTextColor(updated.color);
+  else if (isText) updated.color = '#F2F5F8';
   return updated;
 }
 
@@ -84,7 +86,7 @@ export function ThemeSurface({ children }: { children: React.ReactNode }) {
       const props = child.props;
       const isText = child.type === Text || child.type === TextInput;
       const nextProps: Record<string, unknown> = {};
-      if (isDark && (props.style || isText)) nextProps.style = transformStyle(props.style ?? {}, isRoot, isText);
+      if (isDark && (props.style || isText)) nextProps.style = transformStyle(props.style ?? {}, isRoot, isText, child.type === TextInput);
       if (props.contentContainerStyle) nextProps.contentContainerStyle = isDark ? transformStyle(props.contentContainerStyle, false, false) : props.contentContainerStyle;
       if (typeof props.color === 'string') nextProps.color = isDark ? darkTextColor(props.color) : props.color;
       for (const prop of ['accessibilityLabel', 'accessibilityHint', 'placeholder', 'label', 'title']) {

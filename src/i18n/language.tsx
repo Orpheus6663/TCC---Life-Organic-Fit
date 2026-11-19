@@ -228,6 +228,7 @@ const englishTranslations: Record<string, string> = {
   'Cadastro concluído': 'Registration complete',
   'Concluir questionário': 'Complete questionnaire',
   '(opcional)': '(optional)',
+  ' * opcional': ' * optional',
   '1. SOBRE VOCÊ': '1. ABOUT YOU',
   '2. SEU OBJETIVO': '2. YOUR GOAL',
   '3. SUA ROTINA': '3. YOUR ROUTINE',

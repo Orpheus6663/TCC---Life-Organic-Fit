@@ -7,7 +7,7 @@ import { Input } from '../components/Input';
 import { colors } from '../constants/colors';
 import { ThemeSurface } from '../components/ThemeSurface';
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase';
-import { updateProfile } from '../services/authService';
+import { getPasswordValidationMessage, updatePassword, updateProfile } from '../services/authService';
 
 export default function ConfiguracoesScreen() {
   const [name, setName] = useState('');
@@ -16,6 +16,12 @@ export default function ConfiguracoesScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [password, setPassword] = useState('');
+  const [passwordConfirmation, setPasswordConfirmation] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordNotice, setPasswordNotice] = useState('');
 
   useEffect(() => {
     let isActive = true;
@@ -64,6 +70,33 @@ export default function ConfiguracoesScreen() {
     }
   }
 
+  async function savePassword() {
+    const validationMessage = getPasswordValidationMessage(password);
+    if (validationMessage) {
+      setPasswordError(validationMessage);
+      return;
+    }
+    if (password !== passwordConfirmation) {
+      setPasswordError('As senhas não coincidem.');
+      return;
+    }
+
+    setIsChangingPassword(true);
+    setPasswordError('');
+    setPasswordNotice('');
+    try {
+      await updatePassword(password);
+      setPassword('');
+      setPasswordConfirmation('');
+      setPasswordNotice('Senha alterada com sucesso.');
+      setShowPasswordForm(false);
+    } catch (reason) {
+      setPasswordError(reason instanceof Error ? reason.message : 'Não foi possível alterar a senha. Tente novamente.');
+    } finally {
+      setIsChangingPassword(false);
+    }
+  }
+
   return (
     <ThemeSurface><KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -92,6 +125,28 @@ export default function ConfiguracoesScreen() {
               {error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
               {notice ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text> : null}
               <Button disabled={isSaving} onPress={save}>{isSaving ? 'Salvando...' : 'Salvar alterações'}</Button>
+            </>
+          )}
+        </View>
+
+        <View style={styles.formCard}>
+          <Text style={styles.passwordTitle}>Senha</Text>
+          <Text style={styles.helper}>Altere sua senha enquanto estiver conectado à conta.</Text>
+          {showPasswordForm ? (
+            <>
+              <Input autoComplete="new-password" label="Nova senha" onChangeText={(value) => { setPassword(value); setPasswordError(''); setPasswordNotice(''); }} secureTextEntry value={password} />
+              <Input autoComplete="new-password" label="Confirme a nova senha" onChangeText={(value) => { setPasswordConfirmation(value); setPasswordError(''); setPasswordNotice(''); }} secureTextEntry value={passwordConfirmation} />
+              {passwordError ? <Text accessibilityLiveRegion="polite" style={styles.error}>{passwordError}</Text> : null}
+              {passwordNotice ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{passwordNotice}</Text> : null}
+              <Button disabled={isChangingPassword} onPress={savePassword}>{isChangingPassword ? 'Atualizando...' : 'Salvar nova senha'}</Button>
+              <Pressable accessibilityRole="button" onPress={() => { setShowPasswordForm(false); setPasswordError(''); }} style={styles.cancelButton}>
+                <Text style={styles.cancelText}>Cancelar</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              {passwordNotice ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{passwordNotice}</Text> : null}
+              <Button onPress={() => setShowPasswordForm(true)}>Alterar senha</Button>
             </>
           )}
         </View>
@@ -166,6 +221,20 @@ const styles = StyleSheet.create({
     color: colors.mutedText,
     fontSize: 12,
     marginTop: -8
+  },
+  passwordTitle: {
+    color: colors.text,
+    fontSize: 17,
+    fontWeight: '700'
+  },
+  cancelButton: {
+    alignItems: 'center',
+    padding: 8
+  },
+  cancelText: {
+    color: colors.mutedText,
+    fontSize: 14,
+    fontWeight: '600'
   },
   error: {
     color: colors.danger,

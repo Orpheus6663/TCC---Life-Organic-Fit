@@ -28,7 +28,11 @@ export default function LoginScreen() {
     setFormError('');
     setIsSubmitting(true);
     try {
-      await signIn(email, password);
+      const session = await signIn(email, password);
+      if (session.user.app_metadata?.role === 'admin') {
+        router.replace('/admin');
+        return;
+      }
       const questionnaireComplete = await hasCompletedQuestionnaire();
       router.replace(questionnaireComplete ? '/tabs/home' : '/auth/questionario');
     } catch (error) {
@@ -68,7 +72,7 @@ export default function LoginScreen() {
           {/* Agrupa os campos de acesso. */}
           <View style={styles.fields}>
 
-            <Input autoCapitalize="none" autoComplete="email" keyboardType="email-address" label="Email" onChangeText={setEmail} placeholder="Digite seu email" value={email} />
+            <Input autoCapitalize="none" autoComplete="email" keyboardType="email-address" label="E-mail" onChangeText={setEmail} placeholder="Digite seu e-mail" value={email} />
             <Input autoComplete="password" label="Senha" onChangeText={setPassword} placeholder="Digite sua senha" secureTextEntry value={password} />
 
           </View>

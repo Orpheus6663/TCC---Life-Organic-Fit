@@ -14,7 +14,7 @@ export function Input({ label, style, onBlur, onFocus, ...props }: InputProps) {
       {label ? <Text style={[styles.label, isDark && styles.labelDark]}>{label}</Text> : null}
       <TextInput
         placeholderTextColor={isDark ? '#AEBAC7' : colors.mutedText}
-        style={[styles.input, isDark && styles.inputDark, isFocused && (isDark ? styles.inputFocusedDark : styles.inputFocused), style]}
+        style={[styles.input, isDark && styles.inputDark, isFocused && (isDark ? styles.inputFocusedDark : styles.inputFocused), style, isDark && styles.typedTextDark]}
         onBlur={(event) => {
           setIsFocused(false);
           onBlur?.(event);
@@ -52,7 +52,8 @@ const styles = StyleSheet.create({
     height: 52,
     paddingHorizontal: 16
   },
-  inputDark: { backgroundColor: '#202A35', borderColor: '#405061', color: '#F2F5F8' },
+  inputDark: { backgroundColor: '#202A35', borderColor: '#405061', color: '#FFFFFF' },
+  typedTextDark: { color: '#FFFFFF' },
   // Define os estilos visuais do elemento "inputFocused".
   inputFocused: {
     backgroundColor: colors.white,

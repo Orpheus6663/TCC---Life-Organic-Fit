@@ -6,6 +6,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Image, ImageSourcePropType, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../../constants/colors';
 import { NotificationBell } from '../../components/NotificationBell';
 import { ThemeSurface } from '../../components/ThemeSurface';
@@ -34,6 +35,7 @@ type Comment = {
   authorName?: string;
   authorId?: string;
   avatarId?: string;
+  avatarUrl?: string;
   // Data e horário em que o comentário foi criado.
   createdAt: string;
   // Respostas ligadas a este comentário.
@@ -52,6 +54,7 @@ type ForumPost = {
   authorName?: string;
   authorId?: string;
   avatarId?: string;
+  avatarUrl?: string;
   // Endereço local da foto, presente somente quando há imagem.
   imageUri?: string;
   // Data de criação usada para mostrar quando foi publicado.
@@ -134,9 +137,9 @@ export default function ForumScreen() {
   useFocusEffect(useCallback(() => {
     let isActive = true;
     getDemoProfilePhoto().then((uri) => {
-      if (isActive) setProfilePhotoUri(uri);
+      if (isActive && uri) setProfilePhotoUri(uri);
     }).catch(() => {
-      if (isActive) setProfilePhotoUri(null);
+      // Keep the shared photo from Auth if the device has no local copy.
     });
     return () => { isActive = false; };
   }, []));
@@ -150,12 +153,14 @@ export default function ForumScreen() {
       setUserId(user?.id ?? null);
       setIsAdmin(user?.app_metadata?.role === 'admin');
       setAvatarId(typeof user?.user_metadata?.avatar_id === 'string' ? user.user_metadata.avatar_id : undefined);
+      setProfilePhotoUri(typeof user?.user_metadata?.avatar_url === 'string' ? user.user_metadata.avatar_url : null);
     });
     void client.auth.getUser().then(async ({ data, error }) => {
       if (!error && data.user) {
         setUserName(getProfileName(data.user));
         setUserId(data.user.id);
         setAvatarId(typeof data.user.user_metadata?.avatar_id === 'string' ? data.user.user_metadata.avatar_id : undefined);
+        setProfilePhotoUri(typeof data.user.user_metadata?.avatar_url === 'string' ? data.user.user_metadata.avatar_url : null);
         // Busca JWT atualizado mesmo quando a sessão local ainda não mostra o role.
         const { data: refreshed, error: refreshError } = await client.auth.refreshSession();
         if (refreshError) throw refreshError;
@@ -164,6 +169,18 @@ export default function ForumScreen() {
     });
     return () => authListener.subscription.unsubscribe();
   }, []);
+
+  // Evita que um rascunho escrito por uma conta apareça quando outra pessoa entrar.
+  useEffect(() => {
+    setIsComposerOpen(false);
+    setPostText('');
+    setPhotoUri(null);
+    setExpandedPostId(null);
+    setCommentText('');
+    setReplyingTo(null);
+    setReportingPostId(null);
+    setSearchText('');
+  }, [userId]);
 
   // Mantem a contagem do sino atualizada sem depender do computador de desenvolvimento.
   useEffect(() => {
@@ -455,7 +472,7 @@ export default function ForumScreen() {
   return (
     // Esta camada evita que o teclado cubra os campos quando a pessoa escreve.
     // O style ocupa a tela toda e o behavior adiciona ajuste de teclado somente no iOS.
-    <ThemeSurface><KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <ThemeSurface><SafeAreaView edges={['top']} style={styles.safeArea}><KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       {isComposerOpen ? (
         <>
           {/* Cabeçalho da tela de criação com ação para retornar ao feed. */}
@@ -502,11 +519,11 @@ export default function ForumScreen() {
         <NotificationBell inline />
         {isAdmin ? <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Denúncias pendentes: ${pendingReportCount}`}
+          accessibilityLabel={`Painel administrativo. Denúncias pendentes: ${pendingReportCount}`}
           onPress={() => router.push('/admin')}
           style={styles.notificationButton}
         >
-          <Ionicons name={pendingReportCount > 0 ? 'notifications' : 'notifications-outline'} size={23} color={colors.primary} />
+          <Ionicons name="shield-checkmark-outline" size={23} color={colors.primary} />
           {pendingReportCount > 0 ? <View style={styles.notificationBadge}><Text style={styles.notificationBadgeText}>{pendingReportCount > 99 ? '99+' : pendingReportCount}</Text></View> : null}
         </Pressable> : null}
       </View>
@@ -578,7 +595,7 @@ export default function ForumScreen() {
             {/* Cabeçalho anônimo, data e botão para abrir as opções de denúncia. */}
             <View style={styles.postHeader}>
               <View style={styles.anonymousRow}>
-                <View style={styles.avatar}>{post.authorId === (userId ?? 'local-device') && profilePhotoUri ? <Image source={{ uri: profilePhotoUri }} style={styles.avatarImage} /> : post.avatarId && avatarSources[post.avatarId] ? <Image source={avatarSources[post.avatarId]} style={styles.avatarImage} /> : <Ionicons name="person" size={17} color={colors.primary} />}</View>
+                <View style={styles.avatar}>{post.avatarUrl || (post.authorId === (userId ?? 'local-device') && profilePhotoUri) ? <Image source={{ uri: post.avatarUrl ?? profilePhotoUri! }} style={styles.avatarImage} /> : post.avatarId && avatarSources[post.avatarId] ? <Image source={avatarSources[post.avatarId]} style={styles.avatarImage} /> : <Ionicons name="person" size={17} color={colors.primary} />}</View>
                 <View>
                   <Text style={styles.anonymousLabel}>{post.authorName || 'Anônimo'}</Text>
                   <Text style={styles.postDate}>{new Date(post.createdAt).toLocaleString('pt-BR')}</Text>
@@ -635,7 +652,7 @@ export default function ForumScreen() {
                   // Comentário principal com botão para iniciar uma resposta.
                   <View key={comment.id} style={styles.commentBlock}>
                     <View style={styles.commentRow}>
-                      <View style={styles.smallAvatar}>{comment.authorId === (userId ?? 'local-device') && profilePhotoUri ? <Image source={{ uri: profilePhotoUri }} style={styles.smallAvatarImage} /> : comment.avatarId && avatarSources[comment.avatarId] ? <Image source={avatarSources[comment.avatarId]} style={styles.smallAvatarImage} /> : <Ionicons name="person" size={12} color={colors.primary} />}</View>
+                      <View style={styles.smallAvatar}>{comment.avatarUrl || (comment.authorId === (userId ?? 'local-device') && profilePhotoUri) ? <Image source={{ uri: comment.avatarUrl ?? profilePhotoUri! }} style={styles.smallAvatarImage} /> : comment.avatarId && avatarSources[comment.avatarId] ? <Image source={avatarSources[comment.avatarId]} style={styles.smallAvatarImage} /> : <Ionicons name="person" size={12} color={colors.primary} />}</View>
                       <View style={styles.commentContent}>
                         <Text style={styles.commentAuthor}>{comment.authorName || 'Anônimo'}</Text>
                         <Text style={styles.commentText}>{comment.text}</Text>
@@ -648,7 +665,7 @@ export default function ForumScreen() {
                     {comment.replies.map((reply) => (
                       // Respostas ficam visualmente recuadas em relação ao comentário original.
                       <View key={reply.id} style={styles.replyRow}>
-                        <View style={styles.smallAvatar}>{reply.authorId === (userId ?? 'local-device') && profilePhotoUri ? <Image source={{ uri: profilePhotoUri }} style={styles.smallAvatarImage} /> : reply.avatarId && avatarSources[reply.avatarId] ? <Image source={avatarSources[reply.avatarId]} style={styles.smallAvatarImage} /> : <Ionicons name="person" size={12} color={colors.primary} />}</View>
+                      <View style={styles.smallAvatar}>{reply.avatarUrl || (reply.authorId === (userId ?? 'local-device') && profilePhotoUri) ? <Image source={{ uri: reply.avatarUrl ?? profilePhotoUri! }} style={styles.smallAvatarImage} /> : reply.avatarId && avatarSources[reply.avatarId] ? <Image source={avatarSources[reply.avatarId]} style={styles.smallAvatarImage} /> : <Ionicons name="person" size={12} color={colors.primary} />}</View>
                         <View style={styles.commentContent}>
                           <Text style={styles.commentAuthor}>{reply.authorName || 'Anônimo'} · resposta</Text>
                           <Text style={styles.commentText}>{reply.text}</Text>
@@ -695,7 +712,7 @@ export default function ForumScreen() {
         <Ionicons name={isComposerOpen ? 'close' : 'add'} size={28} color={colors.white} />
       </Pressable>
       </>}
-    </KeyboardAvoidingView></ThemeSurface>
+    </KeyboardAvoidingView></SafeAreaView></ThemeSurface>
   );
 }
 
@@ -705,6 +722,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F6F8FB',
     flex: 1
   },
+  safeArea: { backgroundColor: '#F6F8FB', flex: 1 },
   // Alinha o botão de retorno e o título no cabeçalho da criação.
   composerHeading: { alignItems: 'center', backgroundColor: colors.white, borderBottomColor: '#EAECF0', borderBottomWidth: 1, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 12, paddingTop: 52, paddingBottom: 14 },
   // Reserva uma área de toque consistente para voltar.
